@@ -2,16 +2,15 @@ const OpenAI = require('openai');
 const tiktoken = require("@dqbd/tiktoken");
 const config = require('config');
 const utils = require('./utils');
-const messageStorage = require('./messageStorage');
 
 let _openai = null;
 let _encoder = null;
 
-async function sendToOpenAI() {
-    const messages = messageStorage.getRecentMessages();
+async function sendToOpenAI(messages) {
+    let composedMessages = composeMessages(messages);
     const response = await _openai.chat.completions.create({
         model: config.get('openAI.model'),
-        messages: composeMessages(messages),
+        messages: composedMessages,
         max_tokens: config.get('openAI.maxCompletionTokens')
     });
 
@@ -36,6 +35,7 @@ function composeMessages(messages) {
         role: 'system',
         content: config.get('assistant.systemPrompt')
     }];
+    utils.logDebug(JSON.stringify(result[0]));
 
     let promptTokens = countTokens(result[0]);
     const maxPromptTokens = config.get('openAI.maxPromptTokens');
