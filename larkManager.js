@@ -99,7 +99,7 @@ async function fetchMessagesForDays(day) {
             lastMessageId = message.message_id;
     }
 
-    if (lastMessageId == messagePointer.getLastMessageId())
+    if (lastMessageId == messagePointer.getLastMessageId() || messageQueue[messageQueue.length - 1].bot)
         return;
 
     let reply = await openAIManager.sendToOpenAI(messageQueue);
