@@ -3,17 +3,20 @@ const config = require('config');
 const sharp = require('sharp');
 const openAIManager = require('./openAIManager');
 const utils = require('./utils');
-const messagePointer = require('./messagePointer');
-const schedule = require('node-schedule');
+const messageStorage = require('./messageStorage');
 
-let client;
-let wsClient;
+let client, wsClient;
+
+const idleTime = config.get('assistant.idleTimeSeconds') * 1000; // Convert to milliseconds
+const INSTANT_DELAY = 3000;
+let instantReply = false;
+let triggerId = null;
 
 /**
  * Initializes the Lark client with the provided configuration and logs the initialization.
  * Schedule a job to fetch messages at specified intervals.
  */
-function init() {
+async function init() {
     const baseConfig = {
         appId: config.lark.appId,
         appSecret: config.lark.appSecret,
@@ -24,32 +27,15 @@ function init() {
     client = new lark.Client(baseConfig); // Initialize Lark client
     utils.logDebug('Lark client initialized');
 
-    let rule = new schedule.RecurrenceRule();
-    rule.second = 0;
-    rule.minute = [0, 10, 20, 30, 40, 50];
-    schedule.scheduleJob(rule, () => {
-        fetchMessagesForDays(config.assistant.messageBatchPeriodDays);
-    });
-    utils.logDebug('Scheduled job to fetch messages every 10 minutes');
+    // Fetch messages for the specified number of days
+    await fetchMessagesForDays(config.assistant.messageBatchPeriodDays);
+    utils.logDebug('Messages fetched');
 
     // Initialize WebSocket client
     wsClient = new lark.WSClient({...baseConfig, loggerLevel: lark.LoggerLevel.debug});
     wsClient.start({
         eventDispatcher: new lark.EventDispatcher({}).register({
-            "im.message.receive_v1": async (data) => {
-                utils.logDebug("Receiving message: \n" + JSON.stringify(data.message, null, 4));
-                if (data.message.chat_id == config.lark.chatId) {
-                    if (data.message.mentions) {
-                        for (let i = 0; i < data.message.mentions.length; i++) {
-                            const mention = data.message.mentions[i];
-                            if (mention.name == "李白") {
-                                fetchMessagesForDays(config.assistant.messageBatchPeriodDays);
-                                break;
-                            }
-                        }
-                    }
-                }
-            },
+            "im.message.receive_v1": handleDispatchedMessage,
         }),
     });
 }
@@ -64,46 +50,23 @@ async function fetchMessagesForDays(day) {
     let messages = await fetchMessages(currentTime, startTime);
 
     utils.logDebug('Messages fetched: ' + messages.length);
-    let messageQueue = [];
-    let lastMessageId;
     for (let i = 0; i < messages.length; i++) {
         const message = messages[i];
-        let messageToOpenAI = {};
-        if (message.msg_type == 'system' || message.deleted) {
-            continue;
-        } else {
-            messageToOpenAI.bot = message.sender.sender_type == 'app';
-            if (!messageToOpenAI.bot) {
-                let res = await fetchSenderInfo(message.sender.id);
-                messageToOpenAI.sender = res.data.user.name;
-            } else {
-                messageToOpenAI.sender = '李白';
-            }
-            messageToOpenAI.time = Number(message.create_time);
-        }
-        if (message.msg_type == 'text') {
-            messageToOpenAI.text = JSON.parse(message.body.content).text;
-        }
-        if (message.msg_type == 'interactive') {
-            messageToOpenAI.text = JSON.parse(message.body.content).elements[0][0].text;
-        }
-        utils.logDebug(messageToOpenAI);
-        if (message.msg_type == 'image') {
-            let imageKey = JSON.parse(message.body.content).image_key;
-            let buffer = await fetchImage(message.message_id, imageKey);
-            let dimension = config.get('assistant.imageDimension');
-            const resizedBuffer = await sharp(buffer).resize({ width: dimension, height: dimension, fit: sharp.fit.inside, withoutEnlargement: true }).jpeg().toBuffer();
-            const base64Data = resizedBuffer.toString('base64');
-            messageToOpenAI.image = base64Data;
-        }
-        messageQueue.push(messageToOpenAI);
-        if (!messageToOpenAI.bot)
-            lastMessageId = message.message_id;
+        await generateMessageSentToOpenAI(message);
     }
+}
 
-    if (lastMessageId == messagePointer.getLastMessageId() || messageQueue[messageQueue.length - 1].bot)
+/**
+ * Asynchronously triggers a call to OpenAI and handles the response.
+ * This function retrieves recent messages from the message storage, sends them to OpenAI for processing,
+ * and handles the response by either logging it internally or sending it as a message.
+ */
+async function triggerOpenAICall() {
+    let messageQueue = messageStorage.getRecentMessages();
+    if (messageQueue[messageQueue.length - 1].bot)
         return;
 
+    instantReply = false;
     let reply = await openAIManager.sendToOpenAI(messageQueue);
     if (reply) {
         if (reply.startsWith('[x]')) {
@@ -111,7 +74,6 @@ async function fetchMessagesForDays(day) {
         } else {
             utils.logInfo(`Sending message: ${reply}`);
             reply = reply.replace(/\n/g, '\\n');
-            // utils.logInfo(JSON.stringify(JSON.parse(`\{\"text\":\"${reply}\"\}`)));
             let res = await sendMessage(reply);
             if (res.code == 0) {
                 utils.logDebug('Message sent successfully');
@@ -120,7 +82,49 @@ async function fetchMessagesForDays(day) {
             }
         }
     }
-    messagePointer.setLastMessageId(lastMessageId);
+}
+
+/**
+ * Handles a dispatched message by logging it, checking if it mentions the bot, 
+ * and preparing a response to be sent to OpenAI.
+ * @param {Object} data - The data object containing the message information.
+ * @param {Object} data.message - The message object.
+ * @param {string} data.message.chat_id - The ID of the chat where the message was sent.
+ * @param {Array} [data.message.mentions] - An array of mentions in the message.
+ * @param {Object} data.message.mentions[].id - The ID object of the mention.
+ * @param {string} data.message.mentions[].id.open_id - The open ID of the mentioned user.
+ * @param {string} data.message.message_id - The ID of the message.
+ */
+async function handleDispatchedMessage(data) {
+    if (data.message.chat_id != config.lark.chatId) return;
+    let mentionSelf = false;
+    if (data.message.mentions) {
+        for (let i = 0; i < data.message.mentions.length; i++) {
+            const mention = data.message.mentions[i];
+            if (mention.id.open_id == config.lark.robotOpenId) { // Mentioned the robot
+                mentionSelf = true;
+                break;
+            }
+        }
+    }
+
+    let message = await fetchAMessage(data.message.message_id);
+    if (message) {
+        utils.logDebug("Receiving message: \n" + JSON.stringify(message, null, 4));
+        let messageToOpenAI = await generateMessageSentToOpenAI(message);
+        if (messageToOpenAI && !messageToOpenAI.bot && !instantReply) {
+            if (triggerId) {
+                clearTimeout(triggerId);
+                triggerId = null;
+            }
+            let delay = idleTime;
+            if (mentionSelf) {
+                delay = INSTANT_DELAY;
+                instantReply = true;
+            }
+            triggerId = setTimeout(triggerOpenAICall, delay);
+        }
+    }
 }
 
 /**
@@ -162,6 +166,80 @@ async function fetchMessages(currentTime, startTime, pageToken) {
     } catch (e) {
         console.error(JSON.stringify(e.response.data, null, 4));
         return [];
+    }
+}
+
+/**
+ * Generates a message object to be sent to OpenAI based on the provided message.
+ *
+ * @param {Object} message - The message object to process.
+ * @param {string} message.msg_type - The type of the message (e.g., 'system', 'text', 'interactive', 'image').
+ * @param {boolean} message.deleted - Indicates if the message has been deleted.
+ * @param {Object} message.sender - The sender of the message.
+ * @param {string} message.sender.sender_type - The type of the sender (e.g., 'app').
+ * @param {string} message.sender.id - The ID of the sender.
+ * @param {number} message.create_time - The creation time of the message.
+ * @param {Object} message.body - The body of the message.
+ * @param {string} message.body.content - The content of the message in JSON string format.
+ * @param {string} message.message_id - The ID of the message.
+ */
+async function generateMessageSentToOpenAI(message) {
+    let messageToOpenAI = {};
+    if (message.msg_type == 'system' || message.deleted) {
+        return null;
+    } else {
+        messageToOpenAI.bot = message.sender.sender_type == 'app';
+        if (!messageToOpenAI.bot) {
+            let res = await fetchSenderInfo(message.sender.id);
+            messageToOpenAI.sender = res.data.user.name;
+        } else {
+            messageToOpenAI.sender = '李白';
+        }
+        messageToOpenAI.time = Number(message.create_time);
+    }
+    messageToOpenAI.message_id = message.message_id;
+    if (message.msg_type == 'text') {
+        messageToOpenAI.text = JSON.parse(message.body.content).text;
+    }
+    if (message.msg_type == 'interactive') {
+        messageToOpenAI.text = JSON.parse(message.body.content).elements[0][0].text;
+    }
+    utils.logDebug(messageToOpenAI);
+    if (message.msg_type == 'image') {
+        let imageKey = JSON.parse(message.body.content).image_key;
+        let buffer = await fetchImage(message.message_id, imageKey);
+        let dimension = config.get('assistant.imageDimension');
+        const resizedBuffer = await sharp(buffer).resize({ width: dimension, height: dimension, fit: sharp.fit.inside, withoutEnlargement: true }).jpeg().toBuffer();
+        const base64Data = resizedBuffer.toString('base64');
+        messageToOpenAI.image = base64Data;
+    }
+
+    if (messageToOpenAI) {
+        messageStorage.addMessage(messageToOpenAI);
+    }
+    return messageToOpenAI;
+}
+
+/**
+ * Fetches a message by its ID.
+ * @param {string} messageId - The ID of the message to fetch.
+ */
+async function fetchAMessage(messageId) {
+    let res = await client.im.message.get({
+        path: {
+            message_id: messageId,
+        },
+    });
+    if (res.code == 0) { // 0表示成功
+        if (res.data.items.length == 1) {
+            return res.data.items[0];
+        } else {
+            utils.logError("Error! Message length not valid: message id: " + messageId + ", length: " + res.data.items.length);
+            return null;
+        }
+    } else {
+        utils.logError("Error! Code: " + res.code + ", Msg: " + res.msg);
+        return null;
     }
 }
 
