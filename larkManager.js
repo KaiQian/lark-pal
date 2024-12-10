@@ -38,12 +38,14 @@ function init() {
         eventDispatcher: new lark.EventDispatcher({}).register({
             "im.message.receive_v1": async (data) => {
                 utils.logDebug("Receiving message: \n" + JSON.stringify(data.message, null, 4));
-                if (data.message.mentions) {
-                    for (let i = 0; i < data.message.mentions.length; i++) {
-                        const mention = data.message.mentions[i];
-                        if (mention.name == "李白") {
-                            fetchMessagesForDays(config.assistant.messageBatchPeriodDays);
-                            break;
+                if (data.message.chat_id == config.lark.chatId) {
+                    if (data.message.mentions) {
+                        for (let i = 0; i < data.message.mentions.length; i++) {
+                            const mention = data.message.mentions[i];
+                            if (mention.name == "李白") {
+                                fetchMessagesForDays(config.assistant.messageBatchPeriodDays);
+                                break;
+                            }
                         }
                     }
                 }
