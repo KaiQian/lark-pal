@@ -6,6 +6,10 @@ function addMessage(message) {
     messageQueue.push(message);
 }
 
+function getLastMessage() {
+    return messageQueue[messageQueue.length - 1];
+}
+
 function getRecentMessages() {
     const period = config.get('assistant.messageBatchPeriodDays') * 24 * 3600 * 1000; // Convert to milliseconds
     const startTime = Date.now() - period;
@@ -16,4 +20,4 @@ function init() {
     messageQueue = [];
 }
 
-module.exports = { init, addMessage, getRecentMessages };
+module.exports = { init, addMessage, getLastMessage, getRecentMessages };

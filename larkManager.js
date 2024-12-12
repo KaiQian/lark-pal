@@ -17,6 +17,7 @@ let triggerId = null;
  * Schedule a job to fetch messages at specified intervals.
  */
 async function init() {
+    utils.logDebug('Initializing Lark client...');
     const baseConfig = {
         appId: config.lark.appId,
         appSecret: config.lark.appSecret,
@@ -24,14 +25,17 @@ async function init() {
         // disableTokenCache为false时，SDK会自动管理租户token的获取与刷新，无需使用lark.withTenantToken("token")手动传递token
         disableTokenCache: false
     };
-    client = new lark.Client(baseConfig); // Initialize Lark client
-    utils.logDebug('Lark client initialized');
+    client = new lark.Client(baseConfig);
 
-    // Fetch messages for the specified number of days
+    utils.logDebug('Fetching messages...');
     await fetchMessagesForDays(config.assistant.messageBatchPeriodDays);
     utils.logDebug('Messages fetched');
 
-    // Initialize WebSocket client
+    utils.logDebug('Triggering OpenAI call if needed...');
+    let lastMessage = messageStorage.getLastMessage();
+    TryTriggerOpenAICall(lastMessage, true);
+
+    utils.logDebug('Initializing WebSocket client...');
     wsClient = new lark.WSClient({...baseConfig, loggerLevel: lark.LoggerLevel.debug});
     wsClient.start({
         eventDispatcher: new lark.EventDispatcher({}).register({
@@ -112,18 +116,27 @@ async function handleDispatchedMessage(data) {
     if (message) {
         utils.logDebug("Receiving message: \n" + JSON.stringify(message, null, 4));
         let messageToOpenAI = await generateMessageSentToOpenAI(message);
-        if (messageToOpenAI && !messageToOpenAI.bot && !instantReply) {
-            if (triggerId) {
-                clearTimeout(triggerId);
-                triggerId = null;
-            }
-            let delay = idleTime;
-            if (mentionSelf) {
-                delay = INSTANT_DELAY;
-                instantReply = true;
-            }
-            triggerId = setTimeout(triggerOpenAICall, delay);
+        TryTriggerOpenAICall(messageToOpenAI, mentionSelf);
+    }
+}
+
+/**
+ * Triggers an OpenAI call after a specified delay if certain conditions are met.
+ * @param {Object} messageToOpenAI - The message object to be sent to OpenAI.
+ * @param {boolean} instant - Indicates if the reply should be instant.
+ */
+function TryTriggerOpenAICall(messageToOpenAI, instant) {
+    if (messageToOpenAI && !messageToOpenAI.bot && !instantReply) {
+        if (triggerId) {
+            clearTimeout(triggerId);
+            triggerId = null;
         }
+        let delay = idleTime;
+        if (instant) {
+            delay = INSTANT_DELAY;
+            instantReply = true;
+        }
+        triggerId = setTimeout(triggerOpenAICall, delay);
     }
 }
 
