@@ -1,10 +1,18 @@
+const fs = require('fs');
+const path = require('path');
 const config = require('config');
 const utils = require('./utils');
 
+const storagePath = path.join(__dirname, 'messages.json');
 let messageQueue = [];
+
+function storeMessage() {
+    fs.writeFileSync(storagePath, JSON.stringify(messageQueue, null, 4));
+}
 
 function addMessage(message) {
     messageQueue.push(message);
+    storeMessage();
 }
 
 function getLastMessage() {
