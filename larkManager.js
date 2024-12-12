@@ -66,25 +66,30 @@ async function fetchMessagesForDays(day) {
  * and handles the response by either logging it internally or sending it as a message.
  */
 async function triggerOpenAICall() {
-    let messageQueue = messageStorage.getRecentMessages();
-    if (messageQueue[messageQueue.length - 1].bot)
-        return;
+    try {
+        let messageQueue = messageStorage.getRecentMessages();
+        if (messageQueue[messageQueue.length - 1].bot)
+            return;
 
-    instantReply = false;
-    let reply = await openAIManager.sendToOpenAI(messageQueue);
-    if (reply) {
-        if (reply.startsWith('[x]')) {
-            utils.logInfo(`[Internal] ${reply}`);
-        } else {
-            utils.logInfo(`Sending message: ${reply}`);
-            reply = reply.replace(/\n/g, '\\n');
-            let res = await sendMessage(reply);
-            if (res.code == 0) {
-                utils.logDebug('Message sent successfully');
+        instantReply = false;
+        let reply = await openAIManager.sendToOpenAI(messageQueue);
+        if (reply) {
+            if (reply.startsWith('[x]')) {
+                utils.logInfo(`[Internal] ${reply}`);
             } else {
-                utils.logDebug('Failed to send message: ' + res.code + ', ' + res.msg + ', ' + JSON.stringify(res.data));
+                utils.logInfo(`Sending message: ${reply}`);
+                reply = reply.replace(/\n/g, '\\n');
+                let res = await sendMessage(reply);
+                if (res.code == 0) {
+                    utils.logDebug('Message sent successfully');
+                } else {
+                    utils.logDebug('Failed to send message: ' + res.code + ', ' + res.msg + ', ' + JSON.stringify(res.data));
+                }
             }
         }
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        return null;
     }
 }
 
@@ -100,23 +105,27 @@ async function triggerOpenAICall() {
  * @param {string} data.message.message_id - The ID of the message.
  */
 async function handleDispatchedMessage(data) {
-    if (data.message.chat_id != config.lark.chatId) return;
-    let mentionSelf = false;
-    if (data.message.mentions) {
-        for (let i = 0; i < data.message.mentions.length; i++) {
-            const mention = data.message.mentions[i];
-            if (mention.id.open_id == config.lark.robotOpenId) { // Mentioned the robot
-                mentionSelf = true;
-                break;
+    try {
+        if (data.message.chat_id != config.lark.chatId) return;
+        let mentionSelf = false;
+        if (data.message.mentions) {
+            for (let i = 0; i < data.message.mentions.length; i++) {
+                const mention = data.message.mentions[i];
+                if (mention.id.open_id == config.lark.robotOpenId) { // Mentioned the robot
+                    mentionSelf = true;
+                    break;
+                }
             }
         }
-    }
 
-    let message = await fetchAMessage(data.message.message_id);
-    if (message) {
-        utils.logDebug("Receiving message: \n" + JSON.stringify(message, null, 4));
-        let messageToOpenAI = await generateMessageSentToOpenAI(message);
-        TryTriggerOpenAICall(messageToOpenAI, mentionSelf);
+        let message = await fetchAMessage(data.message.message_id);
+        if (message) {
+            utils.logDebug("Receiving message: \n" + JSON.stringify(message, null, 4));
+            let messageToOpenAI = await generateMessageSentToOpenAI(message);
+            TryTriggerOpenAICall(messageToOpenAI, mentionSelf);
+        }
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
     }
 }
 
@@ -177,7 +186,7 @@ async function fetchMessages(currentTime, startTime, pageToken) {
             return [];
         }
     } catch (e) {
-        console.error(JSON.stringify(e.response.data, null, 4));
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
         return [];
     }
 }
@@ -197,40 +206,45 @@ async function fetchMessages(currentTime, startTime, pageToken) {
  * @param {string} message.message_id - The ID of the message.
  */
 async function generateMessageSentToOpenAI(message) {
-    let messageToOpenAI = {};
-    if (message.msg_type == 'system' || message.deleted) {
-        return null;
-    } else {
-        messageToOpenAI.bot = message.sender.sender_type == 'app';
-        if (!messageToOpenAI.bot) {
-            let res = await fetchSenderInfo(message.sender.id);
-            messageToOpenAI.sender = res.data.user.name;
+    try {
+        let messageToOpenAI = {};
+        if (message.msg_type == 'system' || message.deleted) {
+            return null;
         } else {
-            messageToOpenAI.sender = '李白';
+            messageToOpenAI.bot = message.sender.sender_type == 'app';
+            if (!messageToOpenAI.bot) {
+                let res = await fetchSenderInfo(message.sender.id);
+                messageToOpenAI.sender = res.data.user.name;
+            } else {
+                messageToOpenAI.sender = '李白';
+            }
+            messageToOpenAI.time = Number(message.create_time);
         }
-        messageToOpenAI.time = Number(message.create_time);
-    }
-    messageToOpenAI.message_id = message.message_id;
-    if (message.msg_type == 'text') {
-        messageToOpenAI.text = JSON.parse(message.body.content).text;
-    }
-    if (message.msg_type == 'interactive') {
-        messageToOpenAI.text = JSON.parse(message.body.content).elements[0][0].text;
-    }
-    utils.logDebug(messageToOpenAI);
-    if (message.msg_type == 'image') {
-        let imageKey = JSON.parse(message.body.content).image_key;
-        let buffer = await fetchImage(message.message_id, imageKey);
-        let dimension = config.get('assistant.imageDimension');
-        const resizedBuffer = await sharp(buffer).resize({ width: dimension, height: dimension, fit: sharp.fit.inside, withoutEnlargement: true }).jpeg().toBuffer();
-        const base64Data = resizedBuffer.toString('base64');
-        messageToOpenAI.image = base64Data;
-    }
+        messageToOpenAI.message_id = message.message_id;
+        if (message.msg_type == 'text') {
+            messageToOpenAI.text = JSON.parse(message.body.content).text;
+        }
+        if (message.msg_type == 'interactive') {
+            messageToOpenAI.text = JSON.parse(message.body.content).elements[0][0].text;
+        }
+        utils.logDebug(messageToOpenAI);
+        if (message.msg_type == 'image') {
+            let imageKey = JSON.parse(message.body.content).image_key;
+            let buffer = await fetchImage(message.message_id, imageKey);
+            let dimension = config.get('assistant.imageDimension');
+            const resizedBuffer = await sharp(buffer).resize({ width: dimension, height: dimension, fit: sharp.fit.inside, withoutEnlargement: true }).jpeg().toBuffer();
+            const base64Data = resizedBuffer.toString('base64');
+            messageToOpenAI.image = base64Data;
+        }
 
-    if (messageToOpenAI) {
-        messageStorage.addMessage(messageToOpenAI);
+        if (messageToOpenAI) {
+            messageStorage.addMessage(messageToOpenAI);
+        }
+        return messageToOpenAI;
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        return null;
     }
-    return messageToOpenAI;
 }
 
 /**
@@ -238,20 +252,25 @@ async function generateMessageSentToOpenAI(message) {
  * @param {string} messageId - The ID of the message to fetch.
  */
 async function fetchAMessage(messageId) {
-    let res = await client.im.message.get({
-        path: {
-            message_id: messageId,
-        },
-    });
-    if (res.code == 0) { // 0表示成功
-        if (res.data.items.length == 1) {
-            return res.data.items[0];
+    try {
+        let res = await client.im.message.get({
+            path: {
+                message_id: messageId,
+            },
+        });
+        if (res.code == 0) { // 0表示成功
+            if (res.data.items.length == 1) {
+                return res.data.items[0];
+            } else {
+                utils.logError("Error! Message length not valid: message id: " + messageId + ", length: " + res.data.items.length);
+                return null;
+            }
         } else {
-            utils.logError("Error! Message length not valid: message id: " + messageId + ", length: " + res.data.items.length);
+            utils.logError("Error! Code: " + res.code + ", Msg: " + res.msg);
             return null;
         }
-    } else {
-        utils.logError("Error! Code: " + res.code + ", Msg: " + res.msg);
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
         return null;
     }
 }
@@ -261,17 +280,22 @@ async function fetchAMessage(messageId) {
  * @param {string} userId - The ID of the user to fetch information for.
  */
 async function fetchSenderInfo(userId) {
-    let res = await client.contact.user.get({
-            path: {
-                user_id: userId
-            },
-            params: {
-                user_id_type: 'open_id',
-                department_id_type: 'open_department_id'
+    try {
+        let res = await client.contact.user.get({
+                path: {
+                    user_id: userId
+                },
+                params: {
+                    user_id_type: 'open_id',
+                    department_id_type: 'open_department_id'
+                }
             }
-        }
-    );
-    return res;
+        );
+        return res;
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        return null;
+    }
 }
 
 /**
@@ -303,7 +327,7 @@ async function fetchImage(messageId, imageKey) {
             });
         });
     } catch (e) {
-        console.error(JSON.stringify(e.response.data, null, 4));
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
         return null;
     }
 }
@@ -313,17 +337,22 @@ async function fetchImage(messageId, imageKey) {
  * @param {string} message - The message to be sent.
  */
 async function sendMessage(message) {
-    let res = await client.im.message.create({
-        params: {
-          receive_id_type: "chat_id",
-        },
-        data: {
-          receive_id: config.lark.chatId,
-          msg_type: "text",
-          content: JSON.stringify(JSON.parse(`{"text":"${message}"}`))
-        }
-    });
-    return res;
+    try {
+        let res = await client.im.message.create({
+            params: {
+            receive_id_type: "chat_id",
+            },
+            data: {
+            receive_id: config.lark.chatId,
+            msg_type: "text",
+            content: JSON.stringify(JSON.parse(`{"text":"${message}"}`))
+            }
+        });
+        return res;
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        return null;
+    }
 }
 
 module.exports = { init, fetchMessagesForDays };
