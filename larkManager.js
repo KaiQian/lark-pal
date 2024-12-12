@@ -1,4 +1,4 @@
-const lark = require('@larksuiteoapi/node-sdk'); // lark node-sdk使用说明：https://github.com/larksuite/node-sdk/blob/main/README.zh.md
+const lark = require('@larksuiteoapi/node-sdk'); // lark node-sdk：https://github.com/larksuite/node-sdk/blob/main/README.zh.md
 const config = require('config');
 const sharp = require('sharp');
 const openAIManager = require('./openAIManager');
@@ -21,8 +21,6 @@ async function init() {
     const baseConfig = {
         appId: config.lark.appId,
         appSecret: config.lark.appSecret,
-        // disableTokenCache为true时，SDK不会主动拉取并缓存token，这时需要在发起请求时，调用lark.withTenantToken("token")手动传递
-        // disableTokenCache为false时，SDK会自动管理租户token的获取与刷新，无需使用lark.withTenantToken("token")手动传递token
         disableTokenCache: false
     };
     client = new lark.Client(baseConfig);
@@ -75,11 +73,11 @@ async function fetchMessages(currentTime, startTime, pageToken) {
         );
 
         let messages = [];
-        if (res.code == 0) { // 0表示成功
+        if (res.code == 0) {  // 0 indicates success
             for (let i = 0; i < res.data.items.length; i++) {
                 messages.push(res.data.items[i]);
             }
-            if (res.data.has_more) { // 是否还有更多数据
+            if (res.data.has_more) {
                 return messages.concat(await fetchMessages(currentTime, startTime, res.data.page_token));
             } else {
                 return messages;
@@ -130,16 +128,35 @@ async function generateMessageSentToOpenAI(message) {
         if (message.msg_type == 'interactive') {
             messageToOpenAI.text = JSON.parse(message.body.content).elements[0][0].text;
         }
-        utils.logDebug(messageToOpenAI);
-        if (message.msg_type == 'image') {
-            let imageKey = JSON.parse(message.body.content).image_key;
-            let buffer = await fetchImage(message.message_id, imageKey);
-            let dimension = config.get('assistant.imageDimension');
-            const resizedBuffer = await sharp(buffer).resize({ width: dimension, height: dimension, fit: sharp.fit.inside, withoutEnlargement: true }).jpeg().toBuffer();
-            const base64Data = resizedBuffer.toString('base64');
-            messageToOpenAI.image = base64Data;
+        let imageData = null;
+        if (message.msg_type == 'post') {
+            let post = JSON.parse(message.body.content);
+            messageToOpenAI.text = post.title;
+            if (post.content) {
+                for (let i = 0; i < post.content.length; i++) {
+                    for (let j = 0; j < post.content[i].length; j++) {
+                        if (post.content[i][j].tag == 'text') {
+                            messageToOpenAI.text += '\n' + post.content[i][j].text;
+                        } else if (post.content[i][j].tag == 'a') {
+                            messageToOpenAI.text += '\n' + post.content[i][j].text + ': ' + post.content[i][j].href;
+                        } else if (post.content[i][j].tag == 'at') {
+                            messageToOpenAI.text += '\n' + post.content[i][j].text;
+                        } else if (post.content[i][j].tag == 'img') {
+                            imageData = await fetchImage(message.message_id, post.content[i][j].image_key);
+                            messageToOpenAI.image = "has image"; // temporary
+                        }
+                    }
+                }
+            }
         }
-
+        if (message.msg_type == 'image') {
+            imageData = await fetchImage(message.message_id, JSON.parse(message.body.content).image_key);
+            messageToOpenAI.image = "has image"; // temporary
+        }
+        utils.logDebug(messageToOpenAI); // print the message object before processing image
+        if (imageData) {
+            messageToOpenAI.image = imageData; // fulfill the image field, replacing the temporary value
+        }
         messageStorage.addMessage(messageToOpenAI);
         return messageToOpenAI;
     } catch (e) {
@@ -306,9 +323,12 @@ async function fetchImage(messageId, imageKey) {
                 stream.on('data', (chunk) => {
                     chunks.push(chunk);
                 });
-                stream.on('end', (chunk_1) => {
+                stream.on('end', async () => {
                     const binaryContent = Buffer.concat(chunks);
-                    resolve(binaryContent);
+                    let dimension = config.assistant.imageDimension;
+                    const resizedBuffer = await sharp(binaryContent).resize({ width: dimension, height: dimension, fit: sharp.fit.inside, withoutEnlargement: true }).jpeg().toBuffer();
+                    const base64Data = resizedBuffer.toString('base64');
+                    resolve(base64Data);
                 });
             });
         });

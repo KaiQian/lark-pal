@@ -54,17 +54,17 @@ function composeMessages(messages) {
         });
         const prefix = `${timeStr} ${message.sender}: `;
 
-        if (message.text) {
+        if (message.image) {
+            aiMsg.content = [
+                { type: 'text', text: prefix + message.text },
+                { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${message.image}` } }
+            ];
+        } else if (message.text) {
             if (message.bot) {
                 aiMsg.content = [{type: 'text', text: message.text}];
             } else {
                 aiMsg.content = [{type: 'text', text: prefix + message.text}];
             }
-        } else if (message.image) {
-            aiMsg.content = [
-                { type: 'text', text: prefix },
-                { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${message.image}` } }
-            ];
         }
 
         let tokens = countTokens(aiMsg);
