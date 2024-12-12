@@ -4,18 +4,19 @@ const sharp = require('sharp');
 const openAIManager = require('./openAIManager');
 const utils = require('./utils');
 const messageStorage = require('./messageStorage');
+const messagePointer = require('./messagePointer');
 
 let client, wsClient;
 
 const idleTime = config.get('assistant.idleTimeSeconds') * 1000; // Convert to milliseconds
 const INSTANT_DELAY = 3000;
-let instantReply = false;
+let isCountingDownInstantReplay = false;
 let triggerId = null;
 
 /**
- * Initializes the Lark client with the provided configuration and logs the initialization.
- * Schedule a job to fetch messages at specified intervals.
- */
+* Initializes the Lark client with the provided configuration and logs the initialization.
+* Schedule a job to fetch messages at specified intervals.
+*/
 async function init() {
     utils.logDebug('Initializing Lark client...');
     const baseConfig = {
@@ -24,7 +25,7 @@ async function init() {
         disableTokenCache: false
     };
     client = new lark.Client(baseConfig);
-
+    
     utils.logDebug('Fetching messages...');
     let currentTime = Math.floor(Date.now() / 1000);
     let startTime = currentTime - 3600 * 24 * config.assistant.messageBatchPeriodDays;
@@ -36,11 +37,10 @@ async function init() {
         await generateMessageSentToOpenAI(message);
     }
     utils.logDebug('Messages fetched: ' + messages.length);
-
+    
     utils.logDebug('Triggering OpenAI call if needed...');
-    let lastMessage = messageStorage.getLastMessage();
-    TryTriggerOpenAICall(lastMessage, true);
-
+    TryTriggerOpenAICall(true);
+    
     utils.logDebug('Initializing WebSocket client...');
     wsClient = new lark.WSClient({...baseConfig, loggerLevel: lark.LoggerLevel.debug});
     wsClient.start({
@@ -51,61 +51,61 @@ async function init() {
 }
 
 /**
- * Fetches messages from Lark within a specified time range.
- * @param {number} currentTime - The current time in seconds since the Unix epoch.
- * @param {number} startTime - The start time in seconds since the Unix epoch.
- * @param {string} pageToken - The token for the next page of results.
- */
+* Fetches messages from Lark within a specified time range.
+* @param {number} currentTime - The current time in seconds since the Unix epoch.
+* @param {number} startTime - The start time in seconds since the Unix epoch.
+* @param {string} pageToken - The token for the next page of results.
+*/
 async function fetchMessages(currentTime, startTime, pageToken) {
     utils.logDebug('Fetching messages from Lark...');
     try {
         let res = await client.im.message.list({
-                params: {
-                    container_id_type: 'chat',
-                    container_id: config.lark.chatId,
-                    start_time: startTime.toString(),
-                    end_time: currentTime.toString(),
-                    sort_type: 'ByCreateTimeAsc',
-                    page_size: 10,
-                    page_token: pageToken,
-                },
-            }
-        );
-
-        let messages = [];
-        if (res.code == 0) {  // 0 indicates success
-            for (let i = 0; i < res.data.items.length; i++) {
-                messages.push(res.data.items[i]);
-            }
-            if (res.data.has_more) {
-                return messages.concat(await fetchMessages(currentTime, startTime, res.data.page_token));
-            } else {
-                return messages;
-            }
-        } else {
-            utils.logDebug("Error! Code: " + res.code + ", Msg: " + res.msg);
-            return [];
+            params: {
+                container_id_type: 'chat',
+                container_id: config.lark.chatId,
+                start_time: startTime.toString(),
+                end_time: currentTime.toString(),
+                sort_type: 'ByCreateTimeAsc',
+                page_size: 10,
+                page_token: pageToken,
+            },
         }
-    } catch (e) {
-        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+    );
+    
+    let messages = [];
+    if (res.code == 0) {  // 0 indicates success
+        for (let i = 0; i < res.data.items.length; i++) {
+            messages.push(res.data.items[i]);
+        }
+        if (res.data.has_more) {
+            return messages.concat(await fetchMessages(currentTime, startTime, res.data.page_token));
+        } else {
+            return messages;
+        }
+    } else {
+        utils.logDebug("Error! Code: " + res.code + ", Msg: " + res.msg);
         return [];
     }
+} catch (e) {
+    utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+    return [];
+}
 }
 
 /**
- * Generates a message object to be sent to OpenAI based on the provided message.
- *
- * @param {Object} message - The message object to process.
- * @param {string} message.msg_type - The type of the message (e.g., 'system', 'text', 'interactive', 'image').
- * @param {boolean} message.deleted - Indicates if the message has been deleted.
- * @param {Object} message.sender - The sender of the message.
- * @param {string} message.sender.sender_type - The type of the sender (e.g., 'app').
- * @param {string} message.sender.id - The ID of the sender.
- * @param {number} message.create_time - The creation time of the message.
- * @param {Object} message.body - The body of the message.
- * @param {string} message.body.content - The content of the message in JSON string format.
- * @param {string} message.message_id - The ID of the message.
- */
+* Generates a message object to be sent to OpenAI based on the provided message.
+*
+* @param {Object} message - The message object to process.
+* @param {string} message.msg_type - The type of the message (e.g., 'system', 'text', 'interactive', 'image').
+* @param {boolean} message.deleted - Indicates if the message has been deleted.
+* @param {Object} message.sender - The sender of the message.
+* @param {string} message.sender.sender_type - The type of the sender (e.g., 'app').
+* @param {string} message.sender.id - The ID of the sender.
+* @param {number} message.create_time - The creation time of the message.
+* @param {Object} message.body - The body of the message.
+* @param {string} message.body.content - The content of the message in JSON string format.
+* @param {string} message.message_id - The ID of the message.
+*/
 async function generateMessageSentToOpenAI(message) {
     try {
         let messageToOpenAI = {};
@@ -166,33 +166,39 @@ async function generateMessageSentToOpenAI(message) {
 }
 
 /**
- * Triggers an OpenAI call after a specified delay if certain conditions are met.
- * @param {Object} messageToOpenAI - The message object to be sent to OpenAI.
- * @param {boolean} instant - Indicates if the reply should be instant.
- */
-function TryTriggerOpenAICall(messageToOpenAI, instant) {
-    if (messageToOpenAI && !messageToOpenAI.bot && !instantReply) {
-        if (triggerId) {
-            clearTimeout(triggerId);
-            triggerId = null;
-        }
-        let delay = idleTime;
-        if (instant) {
-            delay = INSTANT_DELAY;
-            instantReply = true;
-        }
-        triggerId = setTimeout(triggerOpenAICall, delay);
+* Triggers an OpenAI call after a specified delay if certain conditions are met.
+* @param {boolean} instantReply - Indicates if the reply should be instant.
+*/
+function TryTriggerOpenAICall(instantReply) {
+    let lastMessage = messageStorage.getLastMessage();
+    if (!lastMessage)
+        return;
+    if (lastMessage.bot)
+        return;
+    if (lastMessage.message_id == messagePointer.getLastMessageId())
+        return;
+    if (isCountingDownInstantReplay)
+        return;
+    if (triggerId) {
+        clearTimeout(triggerId);
+        triggerId = null;
     }
+    let delay = idleTime;
+    if (instantReply) {
+        delay = INSTANT_DELAY;
+        isCountingDownInstantReplay = true;
+    }
+    triggerId = setTimeout(triggerOpenAICall, delay);
 }
 
 /**
- * Asynchronously triggers a call to OpenAI and handles the response.
- * This function retrieves recent messages from the message storage, sends them to OpenAI for processing,
- * and handles the response by either logging it internally or sending it as a message.
- */
+* Asynchronously triggers a call to OpenAI and handles the response.
+* This function retrieves recent messages from the message storage, sends them to OpenAI for processing,
+* and handles the response by either logging it internally or sending it as a message.
+*/
 async function triggerOpenAICall() {
     try {
-        instantReply = false;
+        isCountingDownInstantReplay = false;
         let reply = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages());
         if (reply) {
             if (reply.startsWith('[x]')) {
@@ -207,6 +213,7 @@ async function triggerOpenAICall() {
                     utils.logDebug('Failed to send message: ' + res.code + ', ' + res.msg + ', ' + JSON.stringify(res.data));
                 }
             }
+            messagePointer.setLastMessageId(messageStorage.getLastMessage().message_id);
         }
     } catch (e) {
         utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
@@ -215,16 +222,16 @@ async function triggerOpenAICall() {
 }
 
 /**
- * Handles a dispatched message by logging it, checking if it mentions the bot, 
- * and preparing a response to be sent to OpenAI.
- * @param {Object} data - The data object containing the message information.
- * @param {Object} data.message - The message object.
- * @param {string} data.message.chat_id - The ID of the chat where the message was sent.
- * @param {Array} [data.message.mentions] - An array of mentions in the message.
- * @param {Object} data.message.mentions[].id - The ID object of the mention.
- * @param {string} data.message.mentions[].id.open_id - The open ID of the mentioned user.
- * @param {string} data.message.message_id - The ID of the message.
- */
+* Handles a dispatched message by logging it, checking if it mentions the bot, 
+* and preparing a response to be sent to OpenAI.
+* @param {Object} data - The data object containing the message information.
+* @param {Object} data.message - The message object.
+* @param {string} data.message.chat_id - The ID of the chat where the message was sent.
+* @param {Array} [data.message.mentions] - An array of mentions in the message.
+* @param {Object} data.message.mentions[].id - The ID object of the mention.
+* @param {string} data.message.mentions[].id.open_id - The open ID of the mentioned user.
+* @param {string} data.message.message_id - The ID of the message.
+*/
 async function handleDispatchedMessage(data) {
     try {
         if (data.message.chat_id != config.lark.chatId) return;
@@ -238,12 +245,12 @@ async function handleDispatchedMessage(data) {
                 }
             }
         }
-
+        
         let message = await fetchAMessage(data.message.message_id);
         if (message) {
             utils.logDebug("Receiving message: \n" + JSON.stringify(message, null, 4));
-            let messageToOpenAI = await generateMessageSentToOpenAI(message);
-            TryTriggerOpenAICall(messageToOpenAI, mentionSelf);
+            await generateMessageSentToOpenAI(message);
+            TryTriggerOpenAICall(mentionSelf);
         }
     } catch (e) {
         utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
@@ -251,9 +258,9 @@ async function handleDispatchedMessage(data) {
 }
 
 /**
- * Fetches a message by its ID.
- * @param {string} messageId - The ID of the message to fetch.
- */
+* Fetches a message by its ID.
+* @param {string} messageId - The ID of the message to fetch.
+*/
 async function fetchAMessage(messageId) {
     try {
         let res = await client.im.message.get({
@@ -279,21 +286,20 @@ async function fetchAMessage(messageId) {
 }
 
 /**
- * Fetches the sender information for a given user ID.
- * @param {string} userId - The ID of the user to fetch information for.
- */
+* Fetches the sender information for a given user ID.
+* @param {string} userId - The ID of the user to fetch information for.
+*/
 async function fetchSenderInfo(userId) {
     try {
         let res = await client.contact.user.get({
-                path: {
-                    user_id: userId
-                },
-                params: {
-                    user_id_type: 'open_id',
-                    department_id_type: 'open_department_id'
-                }
+            path: {
+                user_id: userId
+            },
+            params: {
+                user_id_type: 'open_id',
+                department_id_type: 'open_department_id'
             }
-        );
+        });
         return res;
     } catch (e) {
         utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
@@ -302,10 +308,10 @@ async function fetchSenderInfo(userId) {
 }
 
 /**
- * Fetches an image from a message resource.
- * @param {string} messageId - The ID of the message containing the image.
- * @param {string} imageKey - The key of the image file.
- */
+* Fetches an image from a message resource.
+* @param {string} messageId - The ID of the message containing the image.
+* @param {string} imageKey - The key of the image file.
+*/
 async function fetchImage(messageId, imageKey) {
     try {
         return await new Promise((resolve) => {
@@ -339,19 +345,19 @@ async function fetchImage(messageId, imageKey) {
 }
 
 /**
- * Sends a message to a specified chat in Lark.
- * @param {string} message - The message to be sent.
- */
+* Sends a message to a specified chat in Lark.
+* @param {string} message - The message to be sent.
+*/
 async function sendMessage(message) {
     try {
         let res = await client.im.message.create({
             params: {
-            receive_id_type: "chat_id",
+                receive_id_type: "chat_id",
             },
             data: {
-            receive_id: config.lark.chatId,
-            msg_type: "text",
-            content: JSON.stringify(JSON.parse(`{"text":"${message}"}`))
+                receive_id: config.lark.chatId,
+                msg_type: "text",
+                content: JSON.stringify(JSON.parse(`{"text":"${message}"}`))
             }
         });
         return res;

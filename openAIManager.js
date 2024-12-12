@@ -21,12 +21,7 @@ async function sendToOpenAI(messages) {
 
     if (response.choices && response.choices.length > 0) {
         let reply = response.choices[0].message.content;
-        if (reply.startsWith('[x]')) {
-            utils.logInfo(`[Internal] ${reply}`);
-            return null;
-        } else {
-            return reply;
-        }
+        return reply;
     }
 }
 
