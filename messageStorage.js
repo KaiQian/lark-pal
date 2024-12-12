@@ -11,12 +11,28 @@ function storeMessage() {
 }
 
 function addMessage(message) {
+    for (let i = 0; i < messageQueue.length; i++) {
+        if (messageQueue[i].message_id === message.message_id) {
+            utils.logDebug(`Message ${message.message_id} already exists, ignore`);
+            return;
+        }
+    }
     messageQueue.push(message);
     storeMessage();
 }
 
 function getLastMessage() {
     return messageQueue[messageQueue.length - 1];
+}
+
+function getLatestMessageTime() {
+    let latestTime = 0;
+    for (let i = messageQueue.length - 1; i >= 0; i--) {
+        if (messageQueue[i].time > latestTime) {
+            latestTime = messageQueue[i].time;
+        }
+    }
+    return latestTime;
 }
 
 function getRecentMessages() {
@@ -39,7 +55,11 @@ function getRecentMessages() {
 }
 
 function init() {
-    messageQueue = [];
+    if (fs.existsSync(storagePath)) {
+        messageQueue = JSON.parse(fs.readFileSync(storagePath, 'utf8'));
+    } else {
+        messageQueue = [];
+    }
 }
 
-module.exports = { init, addMessage, getLastMessage, getRecentMessages };
+module.exports = { init, addMessage, getLastMessage, getLatestMessageTime, getRecentMessages };

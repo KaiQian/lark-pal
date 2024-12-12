@@ -28,8 +28,16 @@ async function init() {
     client = new lark.Client(baseConfig);
 
     utils.logDebug('Fetching messages...');
-    await fetchMessagesForDays(config.assistant.messageBatchPeriodDays);
-    utils.logDebug('Messages fetched');
+    let currentTime = Math.floor(Date.now() / 1000);
+    let startTime = currentTime - 3600 * 24 * config.assistant.messageBatchPeriodDays;
+    let lastestMessageTime = Math.floor(messageStorage.getLatestMessageTime() / 1000);
+    if (lastestMessageTime > startTime) startTime = lastestMessageTime;
+    let messages = await fetchMessages(currentTime, startTime);
+    for (let i = 0; i < messages.length; i++) {
+        const message = messages[i];
+        await generateMessageSentToOpenAI(message);
+    }
+    utils.logDebug('Messages fetched: ' + messages.length);
 
     utils.logDebug('Triggering OpenAI call if needed...');
     let lastMessage = messageStorage.getLastMessage();
@@ -45,34 +53,14 @@ async function init() {
 }
 
 /**
- * Fetches messages for a specified number of days and processes them.
- * @param {number} day - The number of days to fetch messages for.
- */
-async function fetchMessagesForDays(day) {
-    let currentTime = Math.floor(Date.now() / 1000);
-    let startTime = currentTime - 3600 * 24 * day;
-    let messages = await fetchMessages(currentTime, startTime);
-
-    utils.logDebug('Messages fetched: ' + messages.length);
-    for (let i = 0; i < messages.length; i++) {
-        const message = messages[i];
-        await generateMessageSentToOpenAI(message);
-    }
-}
-
-/**
  * Asynchronously triggers a call to OpenAI and handles the response.
  * This function retrieves recent messages from the message storage, sends them to OpenAI for processing,
  * and handles the response by either logging it internally or sending it as a message.
  */
 async function triggerOpenAICall() {
     try {
-        let messageQueue = messageStorage.getRecentMessages();
-        if (messageQueue[messageQueue.length - 1].bot)
-            return;
-
         instantReply = false;
-        let reply = await openAIManager.sendToOpenAI(messageQueue);
+        let reply = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages());
         if (reply) {
             if (reply.startsWith('[x]')) {
                 utils.logInfo(`[Internal] ${reply}`);
@@ -237,9 +225,7 @@ async function generateMessageSentToOpenAI(message) {
             messageToOpenAI.image = base64Data;
         }
 
-        if (messageToOpenAI) {
-            messageStorage.addMessage(messageToOpenAI);
-        }
+        messageStorage.addMessage(messageToOpenAI);
         return messageToOpenAI;
     } catch (e) {
         utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
@@ -355,4 +341,4 @@ async function sendMessage(message) {
     }
 }
 
-module.exports = { init, fetchMessagesForDays };
+module.exports = { init };
