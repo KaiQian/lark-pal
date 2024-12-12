@@ -53,91 +53,6 @@ async function init() {
 }
 
 /**
- * Asynchronously triggers a call to OpenAI and handles the response.
- * This function retrieves recent messages from the message storage, sends them to OpenAI for processing,
- * and handles the response by either logging it internally or sending it as a message.
- */
-async function triggerOpenAICall() {
-    try {
-        instantReply = false;
-        let reply = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages());
-        if (reply) {
-            if (reply.startsWith('[x]')) {
-                utils.logInfo(`[Internal] ${reply}`);
-            } else {
-                utils.logInfo(`Sending message: ${reply}`);
-                reply = reply.replace(/\n/g, '\\n');
-                let res = await sendMessage(reply);
-                if (res.code == 0) {
-                    utils.logDebug('Message sent successfully');
-                } else {
-                    utils.logDebug('Failed to send message: ' + res.code + ', ' + res.msg + ', ' + JSON.stringify(res.data));
-                }
-            }
-        }
-    } catch (e) {
-        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
-        return null;
-    }
-}
-
-/**
- * Handles a dispatched message by logging it, checking if it mentions the bot, 
- * and preparing a response to be sent to OpenAI.
- * @param {Object} data - The data object containing the message information.
- * @param {Object} data.message - The message object.
- * @param {string} data.message.chat_id - The ID of the chat where the message was sent.
- * @param {Array} [data.message.mentions] - An array of mentions in the message.
- * @param {Object} data.message.mentions[].id - The ID object of the mention.
- * @param {string} data.message.mentions[].id.open_id - The open ID of the mentioned user.
- * @param {string} data.message.message_id - The ID of the message.
- */
-async function handleDispatchedMessage(data) {
-    try {
-        if (data.message.chat_id != config.lark.chatId) return;
-        let mentionSelf = false;
-        if (data.message.mentions) {
-            for (let i = 0; i < data.message.mentions.length; i++) {
-                const mention = data.message.mentions[i];
-                if (mention.id.open_id == config.lark.robotOpenId) { // Mentioned the robot
-                    mentionSelf = true;
-                    break;
-                }
-            }
-        }
-
-        let message = await fetchAMessage(data.message.message_id);
-        if (message) {
-            utils.logDebug("Receiving message: \n" + JSON.stringify(message, null, 4));
-            let messageToOpenAI = await generateMessageSentToOpenAI(message);
-            TryTriggerOpenAICall(messageToOpenAI, mentionSelf);
-        }
-    } catch (e) {
-        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
-    }
-}
-
-/**
- * Triggers an OpenAI call after a specified delay if certain conditions are met.
- * @param {Object} messageToOpenAI - The message object to be sent to OpenAI.
- * @param {boolean} instant - Indicates if the reply should be instant.
- */
-function TryTriggerOpenAICall(messageToOpenAI, instant) {
-    if (messageToOpenAI && !messageToOpenAI.bot && !instantReply) {
-        if (triggerId) {
-            clearTimeout(triggerId);
-            triggerId = null;
-        }
-        let delay = idleTime;
-        if (instant) {
-            delay = INSTANT_DELAY;
-            instantReply = true;
-        }
-        triggerId = setTimeout(triggerOpenAICall, delay);
-    }
-}
-
-/**
  * Fetches messages from Lark within a specified time range.
  * @param {number} currentTime - The current time in seconds since the Unix epoch.
  * @param {number} startTime - The start time in seconds since the Unix epoch.
@@ -230,6 +145,91 @@ async function generateMessageSentToOpenAI(message) {
     } catch (e) {
         utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
         return null;
+    }
+}
+
+/**
+ * Triggers an OpenAI call after a specified delay if certain conditions are met.
+ * @param {Object} messageToOpenAI - The message object to be sent to OpenAI.
+ * @param {boolean} instant - Indicates if the reply should be instant.
+ */
+function TryTriggerOpenAICall(messageToOpenAI, instant) {
+    if (messageToOpenAI && !messageToOpenAI.bot && !instantReply) {
+        if (triggerId) {
+            clearTimeout(triggerId);
+            triggerId = null;
+        }
+        let delay = idleTime;
+        if (instant) {
+            delay = INSTANT_DELAY;
+            instantReply = true;
+        }
+        triggerId = setTimeout(triggerOpenAICall, delay);
+    }
+}
+
+/**
+ * Asynchronously triggers a call to OpenAI and handles the response.
+ * This function retrieves recent messages from the message storage, sends them to OpenAI for processing,
+ * and handles the response by either logging it internally or sending it as a message.
+ */
+async function triggerOpenAICall() {
+    try {
+        instantReply = false;
+        let reply = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages());
+        if (reply) {
+            if (reply.startsWith('[x]')) {
+                utils.logInfo(`[Internal] ${reply}`);
+            } else {
+                utils.logInfo(`Sending message: ${reply}`);
+                reply = reply.replace(/\n/g, '\\n');
+                let res = await sendMessage(reply);
+                if (res.code == 0) {
+                    utils.logDebug('Message sent successfully');
+                } else {
+                    utils.logDebug('Failed to send message: ' + res.code + ', ' + res.msg + ', ' + JSON.stringify(res.data));
+                }
+            }
+        }
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        return null;
+    }
+}
+
+/**
+ * Handles a dispatched message by logging it, checking if it mentions the bot, 
+ * and preparing a response to be sent to OpenAI.
+ * @param {Object} data - The data object containing the message information.
+ * @param {Object} data.message - The message object.
+ * @param {string} data.message.chat_id - The ID of the chat where the message was sent.
+ * @param {Array} [data.message.mentions] - An array of mentions in the message.
+ * @param {Object} data.message.mentions[].id - The ID object of the mention.
+ * @param {string} data.message.mentions[].id.open_id - The open ID of the mentioned user.
+ * @param {string} data.message.message_id - The ID of the message.
+ */
+async function handleDispatchedMessage(data) {
+    try {
+        if (data.message.chat_id != config.lark.chatId) return;
+        let mentionSelf = false;
+        if (data.message.mentions) {
+            for (let i = 0; i < data.message.mentions.length; i++) {
+                const mention = data.message.mentions[i];
+                if (mention.id.open_id == config.lark.robotOpenId) { // Mentioned the robot
+                    mentionSelf = true;
+                    break;
+                }
+            }
+        }
+
+        let message = await fetchAMessage(data.message.message_id);
+        if (message) {
+            utils.logDebug("Receiving message: \n" + JSON.stringify(message, null, 4));
+            let messageToOpenAI = await generateMessageSentToOpenAI(message);
+            TryTriggerOpenAICall(messageToOpenAI, mentionSelf);
+        }
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
     }
 }
 

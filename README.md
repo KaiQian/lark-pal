@@ -1,12 +1,10 @@
-## WechatPal
+## LarkPal
 以下是项目的简易说明，欢迎联系作者。
 
 ### 简介
-这是一个简单的整合OpenAI和微信（企业微信，基于Wechaty）的Node.js服务，可将群聊中收到的消息以一定时间间隔的批次提交给OpenAI作为输入，然后将其输出发送至群聊。
+这是一个简单的整合OpenAI和飞书的Node.js服务，可将群聊中收到的消息以一定时间间隔的批次提交给OpenAI作为输入，然后将其输出发送至群聊。
 
 通过设定System Prompt，可以实现群聊的AI助手功能。即在Prompt中设定好AI的身份以及详细说明其在群中需要做的事情，它可以响应群聊内容并按照设定的身份作出回应。
-
-目前可配置使用PadLocal和WorkPro其中一个Puppet，分别用于个人微信和企业微信。
 
 ### 安装运行说明
 将项目Clone至本地，然后在项目路径下执行：
@@ -16,8 +14,6 @@ cp config/default.sample.json config/default.json
 ```
 
 然后修改`config/default.json`中的配置项：
-- `wechaty.puppetToken` Wechaty的PuppetToken，根据需要填写WorkPro或者PadLocal的Token
-- `wechaty.puppetType` 填写`padlocal`或`workpro`
 - `openAI.APIKey` OpenAI Key
 - `openAI.maxCompletionTokens` 单次OpenAI请求生成的token数限制
 - `openAI.maxPromptTokens` 单次OpenAI请求发送的token数限制，此限制数会与`assistant.messageBatchPeriodDays`一起影响发送给AI的消息数量。需要注意的是，因为实现的原因，token数量的限制并不是精确的。
@@ -26,10 +22,14 @@ cp config/default.sample.json config/default.json
 - `assistant.systemPrompt` AI助手的System Prompt，此prompt每次都会发送给AI，可以在此对AI的身份和功能进行设定。
 - `assistant.groupTopic` 群名。只有该群的消息才会被发送给AI。
 - `assistant.imageDimension` 发送给AI的图片尺寸。群内的图片会被缩小到此尺寸（最长边）后发送给AI。
+- `lark.appId` 飞书的App ID
+- `lark.appSecret` 飞书的App Secret
+- `lark.chatId` 要追踪的飞书群聊Chat ID
+- `lark.robotOpenId` 飞书机器人的Open ID
 
 然后在项目路径下执行以下命令即可启动服务：
 ```bash
-npm run <padlocal|workpro>
+npm run start
 ```
 ### 其他说明
 - 目前程序中设定当AI返回内容以`[x]`开头时，此内容不会被发到群里。如果需要该设定生效，请在systemPrompt中说明此条规则。
