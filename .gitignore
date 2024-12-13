@@ -4,3 +4,4 @@ config/default.json
 messages.json
 .DS_Store
 messagesPointer.txt
+logs
