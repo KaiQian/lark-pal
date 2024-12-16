@@ -122,36 +122,38 @@ async function generateMessageSentToOpenAI(message) {
             messageToOpenAI.time = Number(message.create_time);
         }
         messageToOpenAI.message_id = message.message_id;
-        if (message.msg_type == 'text') {
-            messageToOpenAI.text = JSON.parse(message.body.content).text;
-        }
-        if (message.msg_type == 'interactive') {
-            messageToOpenAI.text = JSON.parse(message.body.content).elements[0][0].text;
-        }
         let imageData = null;
-        if (message.msg_type == 'post') {
-            let post = JSON.parse(message.body.content);
-            messageToOpenAI.text = post.title;
-            if (post.content) {
-                for (let i = 0; i < post.content.length; i++) {
-                    for (let j = 0; j < post.content[i].length; j++) {
-                        if (post.content[i][j].tag == 'text') {
-                            messageToOpenAI.text += '\n' + post.content[i][j].text;
-                        } else if (post.content[i][j].tag == 'a') {
-                            messageToOpenAI.text += '\n' + post.content[i][j].text + ': ' + post.content[i][j].href;
-                        } else if (post.content[i][j].tag == 'at') {
-                            messageToOpenAI.text += '\n' + post.content[i][j].text;
-                        } else if (post.content[i][j].tag == 'img') {
-                            imageData = await fetchImage(message.message_id, post.content[i][j].image_key);
-                            messageToOpenAI.image = "has image"; // temporary
+        switch (message.msg_type) {
+            case 'text':
+                messageToOpenAI.text = JSON.parse(message.body.content).text;
+                break;
+            case 'interactive':
+                messageToOpenAI.text = JSON.parse(message.body.content).elements[0][0].text;
+                break;
+            case 'post':
+                let post = JSON.parse(message.body.content);
+                messageToOpenAI.text = post.title;
+                if (post.content) {
+                    for (let i = 0; i < post.content.length; i++) {
+                        for (let j = 0; j < post.content[i].length; j++) {
+                            if (post.content[i][j].tag == 'text') {
+                                messageToOpenAI.text += '\n' + post.content[i][j].text;
+                            } else if (post.content[i][j].tag == 'a') {
+                                messageToOpenAI.text += '\n' + post.content[i][j].text + ': ' + post.content[i][j].href;
+                            } else if (post.content[i][j].tag == 'at') {
+                                messageToOpenAI.text += '\n' + post.content[i][j].text;
+                            } else if (post.content[i][j].tag == 'img') {
+                                imageData = await fetchImage(message.message_id, post.content[i][j].image_key);
+                                messageToOpenAI.image = "has image"; // temporary
+                            }
                         }
                     }
                 }
-            }
-        }
-        if (message.msg_type == 'image') {
-            imageData = await fetchImage(message.message_id, JSON.parse(message.body.content).image_key);
-            messageToOpenAI.image = "has image"; // temporary
+                break;
+            case 'image':
+                imageData = await fetchImage(message.message_id, JSON.parse(message.body.content).image_key);
+                messageToOpenAI.image = "has image"; // temporary
+                break;
         }
         utils.logDebug(messageToOpenAI); // print the message object before processing image
         if (imageData) {
@@ -246,10 +248,13 @@ async function handleDispatchedMessage(data) {
             }
         }
         
-        let message = await fetchAMessage(data.message.message_id);
-        if (message) {
-            utils.logDebug("Receiving message: \n" + JSON.stringify(message, null, 4));
-            await generateMessageSentToOpenAI(message);
+        let messages = await fetchAMessage(data.message.message_id);
+        if (messages) {
+            for (let i = 0; i < messages.length; i++) {
+                let message = messages[i];
+                utils.logDebug("Receiving message: \n" + JSON.stringify(message, null, 4));
+                await generateMessageSentToOpenAI(message);
+            }
             TryTriggerOpenAICall(mentionSelf);
         }
     } catch (e) {
@@ -269,12 +274,7 @@ async function fetchAMessage(messageId) {
             },
         });
         if (res.code == 0) { // 0表示成功
-            if (res.data.items.length == 1) {
-                return res.data.items[0];
-            } else {
-                utils.logError("Error! Message length not valid: message id: " + messageId + ", length: " + res.data.items.length);
-                return null;
-            }
+            return res.data.items;
         } else {
             utils.logError("Error! Code: " + res.code + ", Msg: " + res.msg);
             return null;
