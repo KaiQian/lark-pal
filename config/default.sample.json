@@ -17,7 +17,8 @@
     "appId": "YOUR_LARK_APP_ID",
     "appSecret": "YOUR_LARK_APP_SECRET",
     "chatId": "YOUR_LARK_GROUP_CHAT_ID",
-    "robotOpenId": "YOUR_ROBOT_OPEN_ID"
+    "robotOpenId": "YOUR_ROBOT_OPEN_ID",
+    "addChatDescToPrompt": false
   },
   "debug": true
 }

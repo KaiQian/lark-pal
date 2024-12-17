@@ -6,8 +6,13 @@ const utils = require('./utils');
 let _openai = null;
 let _encoder = null;
 
-async function sendToOpenAI(messages) {
-    let composedMessages = composeMessages(messages);
+/**
+ * Sends a set of messages to the OpenAI API and returns the response.
+ * @param {Array} messages - An array of message objects to be sent to OpenAI.
+ * @param {string} prompt - System prompt.
+ */
+async function sendToOpenAI(messages, prompt) {
+    let composedMessages = composeMessages(messages, prompt);
     const response = await _openai.chat.completions.create({
         model: config.get('openAI.model'),
         messages: composedMessages,
@@ -25,10 +30,28 @@ async function sendToOpenAI(messages) {
     }
 }
 
-function composeMessages(messages) {
+/**
+ * Composes a list of messages into a format suitable for OpenAI API consumption.
+ *
+ * @param {Array} messages - An array of message objects to be composed.
+ * @param {string} prompt - System prompt.
+ * @returns {Array} An array of message objects formatted for OpenAI API.
+ *
+ * @typedef {Object} Message
+ * @property {boolean} bot - Indicates if the message is from the bot.
+ * @property {string} sender - The sender of the message.
+ * @property {string} text - The text content of the message.
+ * @property {string} image - The base64 encoded image content of the message.
+ * @property {number} time - The timestamp of the message.
+ *
+ * @typedef {Object} FormattedMessage
+ * @property {string} role - The role of the message sender ('system', 'assistant', or 'user').
+ * @property {Array<Object>} content - The content of the message, which can include text and image objects.
+ */
+function composeMessages(messages, prompt) {
     const result = [{
         role: 'system',
-        content: config.get('assistant.systemPrompt')
+        content: prompt
     }];
     utils.logDebug(JSON.stringify(result[0]));
 
@@ -74,6 +97,14 @@ function composeMessages(messages) {
     return result;
 }
 
+/**
+ * Counts the number of tokens in a message.
+ * @param {Object} message - The message object containing the content to be tokenized.
+ * @param {string|Array} message.content - The content of the message, either a string or an array of objects.
+ * @param {string} [message.content[].type] - The type of content, either 'text' or 'image_url'.
+ * @param {string} [message.content[].text] - The text content, if the type is 'text'.
+ * @returns {number} The number of tokens in the message content.
+ */
 function countTokens(message) {
     if (typeof (message.content) === 'string') {
         return _encoder.encode(message.content).length;

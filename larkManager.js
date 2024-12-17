@@ -7,6 +7,7 @@ const messageStorage = require('./messageStorage');
 const messagePointer = require('./messagePointer');
 
 let client, wsClient;
+let chatDesc;
 
 const idleTime = config.get('assistant.idleTimeSeconds') * 1000; // Convert to milliseconds
 const INSTANT_DELAY = 3000;
@@ -25,6 +26,9 @@ async function init() {
         disableTokenCache: false
     };
     client = new lark.Client(baseConfig);
+
+    chatDesc = await fetchChatDescription();
+    utils.logDebug('Fetch chat description: ' + chatDesc);
     
     utils.logDebug('Fetching messages...');
     let currentTime = Math.floor(Date.now() / 1000);
@@ -38,14 +42,15 @@ async function init() {
     }
     utils.logDebug('Messages fetched: ' + messages.length);
     
-    utils.logDebug('Triggering OpenAI call if needed...');
-    TryTriggerOpenAICall(true);
+    let success = TryTriggerOpenAICall(true);
+    utils.logDebug('Instant reply triggered: ' + success);
     
     utils.logDebug('Initializing WebSocket client...');
     wsClient = new lark.WSClient({...baseConfig, loggerLevel: lark.LoggerLevel.debug});
     wsClient.start({
         eventDispatcher: new lark.EventDispatcher({}).register({
             "im.message.receive_v1": handleDispatchedMessage,
+            "im.chat.updated_v1": handleDispatchedChatUpdate
         }),
     });
 }
@@ -173,14 +178,15 @@ async function generateMessageSentToOpenAI(message) {
 */
 function TryTriggerOpenAICall(instantReply) {
     let lastMessage = messageStorage.getLastMessage();
-    if (!lastMessage)
-        return;
-    if (lastMessage.bot)
-        return;
-    if (lastMessage.message_id == messagePointer.getLastMessageId())
-        return;
-    if (isCountingDownInstantReplay)
-        return;
+    if (!lastMessage) // No messages
+        return false;
+    if (lastMessage.bot) // Last message was sent by the bot
+        return false;
+    if (lastMessage.message_id == messagePointer.getLastMessageId()) // Last message has been processed
+        return false;
+    if (isCountingDownInstantReplay) // Instant reply is already counting down
+        return false;
+
     if (triggerId) {
         clearTimeout(triggerId);
         triggerId = null;
@@ -191,6 +197,7 @@ function TryTriggerOpenAICall(instantReply) {
         isCountingDownInstantReplay = true;
     }
     triggerId = setTimeout(triggerOpenAICall, delay);
+    return true;
 }
 
 /**
@@ -201,7 +208,11 @@ function TryTriggerOpenAICall(instantReply) {
 async function triggerOpenAICall() {
     try {
         isCountingDownInstantReplay = false;
-        let reply = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages());
+        let prompt = config.assistant.systemPrompt;
+        if (config.lark.addChatDescToPrompt) {
+            prompt += '\n' + chatDesc;
+        }
+        let reply = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages(), prompt);
         if (reply) {
             if (reply.startsWith('[x]')) {
                 utils.logInfo(`[Internal] ${reply}`);
@@ -216,6 +227,30 @@ async function triggerOpenAICall() {
                 }
             }
             messagePointer.setLastMessageId(messageStorage.getLastMessage().message_id);
+        }
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        return null;
+    }
+}
+
+/**
+ * Fetches the description of a chat from the Lark API.
+ * @returns {Promise<string|null>} The description of the chat if successful, otherwise null.
+ */
+async function fetchChatDescription() {
+    try {
+        let res = await client.im.chat.get({
+                path: {
+                    chat_id: config.lark.chatId
+                }
+            }
+        );
+        if (res.code == 0) {
+            return res.data.description;
+        } else {
+            utils.logError("Error! Code: " + res.code + ", Msg: " + res.msg);
+            return null;
         }
     } catch (e) {
         utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
@@ -256,6 +291,25 @@ async function handleDispatchedMessage(data) {
                 await generateMessageSentToOpenAI(message);
             }
             TryTriggerOpenAICall(mentionSelf);
+        }
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+    }
+}
+
+/**
+ * Handles the dispatched chat update event.
+ * @param {Object} data - The data object containing chat update information.
+ * @param {string} data.chat_id - The ID of the chat.
+ * @param {Object} [data.after_change] - The object containing changes after the update.
+ * @param {string} [data.after_change.description] - The new description of the chat.
+ */
+async function handleDispatchedChatUpdate(data) {
+    try {
+        if (data.chat_id != config.lark.chatId) return;
+        if (data.after_change && data.after_change.description) {
+            chatDesc = data.after_change.description;
+            utils.logDebug("Chat description updated: " + chatDesc);
         }
     } catch (e) {
         utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);

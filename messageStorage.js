@@ -36,10 +36,7 @@ function getLatestMessageTime() {
 }
 
 function getRecentMessages() {
-    // The last n days
     let period = config.assistant.messageBatchPeriodDays * 24 * 3600 * 1000; // Convert to milliseconds
-    utils.logDebug(`Time from ${config.assistant.messageBatchPeriodDays} days ago: ${period}`);
-
     const startTime = Date.now() - period;
     return messageQueue.filter(message => new Date(message.time).getTime() >= startTime);
 }
