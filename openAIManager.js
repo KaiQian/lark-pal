@@ -10,23 +10,25 @@ let _encoder = null;
  * Sends a set of messages to the OpenAI API and returns the response.
  * @param {Array} messages - An array of message objects to be sent to OpenAI.
  * @param {string} prompt - System prompt.
+ * @param {string} model - The model to use for the request.
  */
-async function sendToOpenAI(messages, prompt) {
+async function sendToOpenAI(messages, prompt, model) {
     let composedMessages = composeMessages(messages, prompt);
     const response = await _openai.chat.completions.create({
-        model: config.get('openAI.model'),
+        model: model,
         messages: composedMessages,
-        max_tokens: config.get('openAI.maxCompletionTokens')
+        max_tokens: config.openAI.maxCompletionTokens
     });
 
     const usage = response.usage;
-    let price = usage.prompt_tokens * config.get('openAI.inputPrice') / 1000
-            + usage.completion_tokens * config.get('openAI.outputPrice') / 1000;
-    utils.logDebug(`Usage: ${JSON.stringify(usage)} Price: $${price.toFixed(2)}`);
+    let inputPrice = config.openAI.models[model].inputPrice;
+    let outputPrice = config.openAI.models[model].outputPrice;
+    let price = usage.prompt_tokens * inputPrice / 1000000 + usage.completion_tokens * outputPrice / 1000000;
+    utils.logDebug(`Usage: ${JSON.stringify(usage, null, 4)} Input Price: ${inputPrice}, Output Price: ${outputPrice}, Total Cost: $${price.toFixed(4)}`);
 
     if (response.choices && response.choices.length > 0) {
         let reply = response.choices[0].message.content;
-        return reply;
+        return reply + "\n\n使用模型: " + model + " 本次消耗: " + price.toFixed(4) + " 美元";
     }
 }
 

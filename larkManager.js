@@ -1,4 +1,4 @@
-const lark = require('@larksuiteoapi/node-sdk'); // lark node-sdk：https://github.com/larksuite/node-sdk/blob/main/README.zh.md
+const lark = require('@larksuiteoapi/node-sdk');
 const config = require('config');
 const sharp = require('sharp');
 const openAIManager = require('./openAIManager');
@@ -26,9 +26,10 @@ async function init() {
         disableTokenCache: false
     };
     client = new lark.Client(baseConfig);
-
+    utils.logDebug('Lark client initialized');
+    
     chatDesc = await fetchChatDescription();
-    utils.logDebug('Fetch chat description: ' + chatDesc);
+    utils.logDebug('Fetch chat description: ' + JSON.stringify(chatDesc, null, 4));
     
     utils.logDebug('Fetching messages...');
     let currentTime = Math.floor(Date.now() / 1000);
@@ -74,27 +75,26 @@ async function fetchMessages(currentTime, startTime, pageToken) {
                 page_size: 10,
                 page_token: pageToken,
             },
-        }
-    );
-    
-    let messages = [];
-    if (res.code == 0) {  // 0 indicates success
-        for (let i = 0; i < res.data.items.length; i++) {
-            messages.push(res.data.items[i]);
-        }
-        if (res.data.has_more) {
-            return messages.concat(await fetchMessages(currentTime, startTime, res.data.page_token));
+        });
+        
+        let messages = [];
+        if (res.code == 0) {  // 0 indicates success
+            for (let i = 0; i < res.data.items.length; i++) {
+                messages.push(res.data.items[i]);
+            }
+            if (res.data.has_more) {
+                return messages.concat(await fetchMessages(currentTime, startTime, res.data.page_token));
+            } else {
+                return messages;
+            }
         } else {
-            return messages;
+            utils.logDebug("Error! Code: " + res.code + ", Msg: " + res.msg);
+            return [];
         }
-    } else {
-        utils.logDebug("Error! Code: " + res.code + ", Msg: " + res.msg);
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
         return [];
     }
-} catch (e) {
-    utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
-    return [];
-}
 }
 
 /**
@@ -209,10 +209,17 @@ async function triggerOpenAICall() {
     try {
         isCountingDownInstantReplay = false;
         let prompt = config.assistant.systemPrompt;
-        if (config.lark.addChatDescToPrompt) {
-            prompt += '\n' + chatDesc;
+        let model = config.openAI.model;
+        if (config.lark.useChatDesc) {
+            if (chatDesc.prompt) {
+                prompt += '\n' + chatDesc.prompt;
+            }
+            if (chatDesc.model && config.openAI.models[chatDesc.model]) {
+                model = chatDesc.model;
+            }
         }
-        let reply = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages(), prompt);
+        utils.logDebug('Sending message to OpenAI with model: ' + model);
+        let reply = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages(), prompt, model);
         if (reply) {
             if (reply.startsWith('[x]')) {
                 utils.logInfo(`[Internal] ${reply}`);
@@ -235,6 +242,40 @@ async function triggerOpenAICall() {
 }
 
 /**
+* Processes the chat description to extract the prompt and model.
+* @param {string} chatDesc - The chat description in JSON string format.
+* @returns {Object} An object containing the prompt and model.
+*/
+function processChatDesc(chatDesc) {
+    let description;
+    try {
+        description = JSON.parse(chatDesc);
+    } catch (e) {
+        description = {"prompt": chatDesc};
+    }
+    return description;
+}
+
+/**
+ * Handles the dispatched chat update event.
+ * @param {Object} data - The data object containing chat update information.
+ * @param {string} data.chat_id - The ID of the chat.
+ * @param {Object} [data.after_change] - The object containing changes after the update.
+ * @param {string} [data.after_change.description] - The new description of the chat.
+ */
+async function handleDispatchedChatUpdate(data) {
+    try {
+        if (data.chat_id != config.lark.chatId) return;
+        if (data.after_change && data.after_change.description) {
+            chatDesc = processChatDesc(data.after_change.description);
+            utils.logDebug("Chat description updated: " + data.after_change.description);
+        }
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+    }
+}
+
+/**
  * Fetches the description of a chat from the Lark API.
  * @returns {Promise<string|null>} The description of the chat if successful, otherwise null.
  */
@@ -247,7 +288,7 @@ async function fetchChatDescription() {
             }
         );
         if (res.code == 0) {
-            return res.data.description;
+            return processChatDesc(res.data.description);
         } else {
             utils.logError("Error! Code: " + res.code + ", Msg: " + res.msg);
             return null;
@@ -291,25 +332,6 @@ async function handleDispatchedMessage(data) {
                 await generateMessageSentToOpenAI(message);
             }
             TryTriggerOpenAICall(mentionSelf);
-        }
-    } catch (e) {
-        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
-    }
-}
-
-/**
- * Handles the dispatched chat update event.
- * @param {Object} data - The data object containing chat update information.
- * @param {string} data.chat_id - The ID of the chat.
- * @param {Object} [data.after_change] - The object containing changes after the update.
- * @param {string} [data.after_change.description] - The new description of the chat.
- */
-async function handleDispatchedChatUpdate(data) {
-    try {
-        if (data.chat_id != config.lark.chatId) return;
-        if (data.after_change && data.after_change.description) {
-            chatDesc = data.after_change.description;
-            utils.logDebug("Chat description updated: " + chatDesc);
         }
     } catch (e) {
         utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);

@@ -1,11 +1,23 @@
 {
   "openAI": {
     "apiKey": "YOUR_OPENAI_API_KEY",
-    "inputPrice": "0.005",
-    "outputPrice": "0.015",
     "maxCompletionTokens": 2000,
     "maxPromptTokens": 5000,
-    "model": "gpt-4o"
+    "model": "gpt-4o",
+    "models": {
+      "gpt-4o": {
+        "inputPrice": 2.5,
+        "outputPrice": 10
+      },
+      "gpt-4o-mini": {
+        "inputPrice": 0.15,
+        "outputPrice": 0.6
+      },
+      "o1": {
+        "inputPrice": 15,
+        "outputPrice": 60
+      }
+    }
   },
   "assistant": {
     "idleTimeSeconds": 600,
@@ -18,7 +30,7 @@
     "appSecret": "YOUR_LARK_APP_SECRET",
     "chatId": "YOUR_LARK_GROUP_CHAT_ID",
     "robotOpenId": "YOUR_ROBOT_OPEN_ID",
-    "addChatDescToPrompt": false
+    "useChatDesc": false
   },
   "debug": true
 }
