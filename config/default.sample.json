@@ -1,23 +1,43 @@
 {
   "openAI": {
-    "apiKey": "YOUR_OPENAI_API_KEY",
+    "model": "gpt-4o",
     "maxCompletionTokens": 2000,
     "maxPromptTokens": 5000,
-    "model": "gpt-4o",
-    "models": {
-      "gpt-4o": {
-        "inputPrice": 2.5,
-        "outputPrice": 10
+    "llms": [
+      {
+        "name": "OpenAI",
+        "apiKey": "YOUR_OPENAI_API_KEY",
+        "models": {
+          "gpt-4o": {
+            "inputPrice": 2.5,
+            "outputPrice": 10
+          },
+          "gpt-4o-mini": {
+            "inputPrice": 0.15,
+            "outputPrice": 0.6
+          },
+          "o1": {
+            "inputPrice": 15,
+            "outputPrice": 60
+          }
+        }
       },
-      "gpt-4o-mini": {
-        "inputPrice": 0.15,
-        "outputPrice": 0.6
-      },
-      "o1": {
-        "inputPrice": 15,
-        "outputPrice": 60
+      {
+        "name": "Qwen",
+        "apiKey": "YOUR_QWEN_API_KEY",
+        "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1", 
+        "models": {
+          "qwen-max": {
+            "inputPrice": 20,
+            "outputPrice": 60
+          },
+          "qwen-plus": {
+            "inputPrice": 0.8,
+            "outputPrice": 2
+          }
+        }
       }
-    }
+    ]
   },
   "assistant": {
     "idleTimeSeconds": 600,

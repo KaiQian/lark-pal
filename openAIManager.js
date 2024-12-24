@@ -3,8 +3,35 @@ const tiktoken = require("@dqbd/tiktoken");
 const config = require('config');
 const utils = require('./utils');
 
-let _openai = null;
+let _llms = {};
+let _llmForModel = {};
 let _encoder = null;
+
+function getLLM(model) {
+    return _llms[_llmForModel[model]];
+}
+
+function getModel(model) {
+    for (let llm of config.openAI.llms) {
+        if (llm.models[model]) {
+            return llm.models[model];
+        }
+    }
+    return null;
+}
+
+function getCurrencySymbol(model) {
+    for (let llm of config.openAI.llms) {
+        if (llm.models[model]) {
+            return llm.currencySymbol;
+        }
+    }
+    return null;
+}
+
+function isModelAvailable(model) {
+    return !!_llmForModel[model];
+}
 
 /**
  * Sends a set of messages to the OpenAI API and returns the response.
@@ -13,22 +40,30 @@ let _encoder = null;
  * @param {string} model - The model to use for the request.
  */
 async function sendToOpenAI(messages, prompt, model) {
+    if (!isModelAvailable(model)) {
+        model = config.openAI.model;
+    }
     let composedMessages = composeMessages(messages, prompt);
-    const response = await _openai.chat.completions.create({
+    utils.logDebug(`Sending message to ${_llmForModel[model]}: Model ${model}`);
+    const response = await getLLM(model).chat.completions.create({
         model: model,
         messages: composedMessages,
         max_tokens: config.openAI.maxCompletionTokens
     });
 
     const usage = response.usage;
-    let inputPrice = config.openAI.models[model].inputPrice;
-    let outputPrice = config.openAI.models[model].outputPrice;
-    let price = usage.prompt_tokens * inputPrice / 1000000 + usage.completion_tokens * outputPrice / 1000000;
-    utils.logDebug(`Usage: ${JSON.stringify(usage, null, 4)} Input Price: ${inputPrice}, Output Price: ${outputPrice}, Total Cost: $${price.toFixed(4)}`);
+    let modelInfo = getModel(model);
+    if (modelInfo) {
+        let inputPrice = modelInfo.inputPrice;
+        let outputPrice = modelInfo.outputPrice;
+        let price = usage.prompt_tokens * inputPrice / 1000000 + usage.completion_tokens * outputPrice / 1000000;
+        let currencySymbol = getCurrencySymbol(model);
+        utils.logDebug(`Usage: ${JSON.stringify(usage, null, 4)} Input Price: ${inputPrice}, Output Price: ${outputPrice}, Total Cost: ${currencySymbol}${price.toFixed(4)}`);
+    }
 
     if (response.choices && response.choices.length > 0) {
         let reply = response.choices[0].message.content;
-        return reply + "\n\n使用模型: " + model + " 本次消耗: " + price.toFixed(4) + " 美元";
+        return reply + "\n\n模型: " + model;
     }
 }
 
@@ -125,7 +160,12 @@ function countTokens(message) {
 }
 
 function init() {
-    _openai = new OpenAI({ apiKey: config.get('openAI.apiKey') });
+    for (let llm of config.openAI.llms) {
+        _llms[llm.name] = new OpenAI({ apiKey: llm.apiKey, baseURL: llm.baseURL });
+        for (let model in llm.models) {
+            _llmForModel[model] = llm.name;
+        }
+    }
     _encoder = tiktoken.get_encoding("cl100k_base");
 }
 
