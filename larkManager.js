@@ -76,7 +76,7 @@ async function fetchMessages(currentTime, startTime, pageToken) {
                 page_token: pageToken,
             },
         });
-        
+
         let messages = [];
         if (res.code == 0) {  // 0 indicates success
             for (let i = 0; i < res.data.items.length; i++) {
@@ -214,7 +214,7 @@ async function triggerOpenAICall() {
             if (chatDesc.prompt) {
                 prompt += '\n' + chatDesc.prompt;
             }
-            if (chatDesc.model && config.openAI.models[chatDesc.model]) {
+            if (chatDesc.model) {
                 model = chatDesc.model;
             }
         }
@@ -390,8 +390,8 @@ async function fetchSenderInfo(userId) {
 */
 async function fetchImage(messageId, imageKey) {
     try {
-        return await new Promise((resolve) => {
-            client.im.messageResource.get({
+        return await new Promise(async (resolve) => {
+            let res = await client.im.messageResource.get({
                 path: {
                     message_id: messageId,
                     file_key: imageKey,
@@ -399,19 +399,18 @@ async function fetchImage(messageId, imageKey) {
                 params: {
                     type: "image",
                 },
-            }).then((res) => {
-                let stream = res.getReadableStream();
-                let chunks = [];
-                stream.on('data', (chunk) => {
-                    chunks.push(chunk);
-                });
-                stream.on('end', async () => {
-                    const binaryContent = Buffer.concat(chunks);
-                    let dimension = config.assistant.imageDimension;
-                    const resizedBuffer = await sharp(binaryContent).resize({ width: dimension, height: dimension, fit: sharp.fit.inside, withoutEnlargement: true }).jpeg().toBuffer();
-                    const base64Data = resizedBuffer.toString('base64');
-                    resolve(base64Data);
-                });
+            });
+            let stream = res.getReadableStream();
+            let chunks = [];
+            stream.on('data', (chunk) => {
+                chunks.push(chunk);
+            });
+            stream.on('end', async () => {
+                const binaryContent = Buffer.concat(chunks);
+                let dimension = 512;
+                const resizedBuffer = await sharp(binaryContent).resize({ width: dimension, height: dimension, fit: sharp.fit.inside, withoutEnlargement: true }).jpeg().toBuffer();
+                const base64Data = resizedBuffer.toString('base64');
+                resolve(base64Data);
             });
         });
     } catch (e) {

@@ -21,7 +21,6 @@ cp config/default.sample.json config/default.json
 - `assistant.messageBatchPeriodDays` 每次向OpenAI发送的消息数量（天），即每次会发送这么多天内的消息给AI。此数值越大，AI能获取的信息量也越大，但也会增加成本。另外，当消息对应的token数量超过`openAI.maxPromptTokens`时，会自动去掉最早的消息。
 - `assistant.systemPrompt` AI助手的System Prompt，此prompt每次都会发送给AI，可以在此对AI的身份和功能进行设定。
 - `assistant.groupTopic` 群名。只有该群的消息才会被发送给AI。
-- `assistant.imageDimension` 发送给AI的图片尺寸。群内的图片会被缩小到此尺寸（最长边）后发送给AI。
 - `lark.appId` 飞书的App ID
 - `lark.appSecret` 飞书的App Secret
 - `lark.chatId` 要追踪的飞书群聊Chat ID

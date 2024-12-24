@@ -1,29 +1,60 @@
 {
   "openAI": {
-    "apiKey": "YOUR_OPENAI_API_KEY",
+    "model": "gpt-4o",
     "maxCompletionTokens": 2000,
     "maxPromptTokens": 5000,
-    "model": "gpt-4o",
-    "models": {
-      "gpt-4o": {
-        "inputPrice": 2.5,
-        "outputPrice": 10
+    "llms": [
+      {
+        "name": "OpenAI",
+        "apiKey": "YOUR_OPENAI_API_KEY",
+        "currencySymbol": "$",
+        "tokenCountForImage512": 255,
+        "models": {
+          "gpt-4o": {
+            "inputPrice": 2.5,
+            "outputPrice": 10
+          },
+          "gpt-4o-mini": {
+            "inputPrice": 0.15,
+            "outputPrice": 0.6
+          },
+          "o1": {
+            "inputPrice": 15,
+            "outputPrice": 60
+          }
+        }
       },
-      "gpt-4o-mini": {
-        "inputPrice": 0.15,
-        "outputPrice": 0.6
-      },
-      "o1": {
-        "inputPrice": 15,
-        "outputPrice": 60
+      {
+        "name": "Qwen",
+        "apiKey": "YOUR_QWEN_API_KEY",
+        "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1", 
+        "currencySymbol": "￥",
+        "tokenCountForImage512": 334,
+        "models": {
+          "qwen-max": {
+            "inputPrice": 20,
+            "outputPrice": 60
+          },
+          "qwen-plus": {
+            "inputPrice": 0.8,
+            "outputPrice": 2
+          },
+          "qwen-vl-max": {
+            "inputPrice": 20,
+            "outputPrice": 20
+          },
+          "qwen-vl-plus": {
+            "inputPrice": 8,
+            "outputPrice": 8
+          }
+        }
       }
-    }
+    ]
   },
   "assistant": {
     "idleTimeSeconds": 600,
     "messageBatchPeriodDays": 14,
-    "systemPrompt": "Your system prompt here",
-    "imageDimension": 1024
+    "systemPrompt": "Your system prompt here"
   },
   "lark": {
     "appId": "YOUR_LARK_APP_ID",
