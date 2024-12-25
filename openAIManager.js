@@ -65,13 +65,12 @@ async function sendToOpenAI(messages, prompt, model) {
     if (modelInfo) {
         let inputPrice = modelInfo.inputPrice;
         let outputPrice = modelInfo.outputPrice;
-        let price = usage.prompt_tokens * inputPrice / 1000000 + usage.completion_tokens * outputPrice / 1000000;
+        let cost = usage.prompt_tokens * inputPrice / 1000000 + usage.completion_tokens * outputPrice / 1000000;
         let currencySymbol = getCurrencySymbol(model);
-        utils.logDebug(`Usage: ${JSON.stringify(usage, null, 4)} Input Price: ${inputPrice}, Output Price: ${outputPrice}, Total Cost: ${currencySymbol}${price.toFixed(4)}`);
+        utils.logInfo(`Usage: ${JSON.stringify(usage, null, 4)} Input Price: ${inputPrice}, Output Price: ${outputPrice}, Total Cost: ${currencySymbol}${cost.toFixed(4)}`);
         if (response.choices && response.choices.length > 0) {
             let reply = response.choices[0].message.content;
-            reply += `\n\n模型:${model}, 费用:${currencySymbol}${price.toFixed(4)}`;
-            return reply;
+            return {reply, model, cost, currencySymbol};
         }
     }
 }

@@ -209,23 +209,23 @@ async function triggerOpenAICall() {
     try {
         isCountingDownInstantReplay = false;
         let prompt = config.assistant.systemPrompt;
-        let model = config.openAI.model;
+        let inputModel = config.openAI.model;
         if (config.lark.useChatDesc) {
             if (chatDesc.prompt) {
                 prompt += '\n' + chatDesc.prompt;
             }
             if (chatDesc.model) {
-                model = chatDesc.model;
+                inputModel = chatDesc.model;
             }
         }
-        utils.logDebug('Sending message to OpenAI with model: ' + model);
-        let reply = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages(), prompt, model);
+        let {reply, model, cost, currencySymbol} = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages(), prompt, inputModel);
         if (reply) {
             if (reply.startsWith('[x]')) {
                 utils.logInfo(`[Internal] ${reply}`);
             } else {
                 utils.logInfo(`Sending message: ${reply}`);
                 reply = reply.replace(/\n/g, '\\n');
+                // reply += `\\n\\n模型: ${model}, 费用: ${currencySymbol}${cost.toFixed(4)}`;
                 let res = await sendMessage(reply);
                 if (res.code == 0) {
                     utils.logDebug('Message sent successfully');
@@ -265,10 +265,11 @@ function processChatDesc(chatDesc) {
  */
 async function handleDispatchedChatUpdate(data) {
     try {
+        utils.logDebug("Handling dispatched chat update: " + JSON.stringify(data, null, 4));
         if (data.chat_id != config.lark.chatId) return;
         if (data.after_change && data.after_change.description) {
             chatDesc = processChatDesc(data.after_change.description);
-            utils.logDebug("Chat description updated: " + data.after_change.description);
+            utils.logInfo("Chat description updated: " + data.after_change.description);
         }
     } catch (e) {
         utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
@@ -312,6 +313,7 @@ async function fetchChatDescription() {
 */
 async function handleDispatchedMessage(data) {
     try {
+        utils.logDebug("Handling dispatched message: " + JSON.stringify(data, null, 4));
         if (data.message.chat_id != config.lark.chatId) return;
         let mentionSelf = false;
         if (data.message.mentions) {
@@ -328,7 +330,7 @@ async function handleDispatchedMessage(data) {
         if (messages) {
             for (let i = 0; i < messages.length; i++) {
                 let message = messages[i];
-                utils.logDebug("Receiving message: \n" + JSON.stringify(message, null, 4));
+                utils.logInfo("Full message information: \n" + JSON.stringify(message, null, 4));
                 await generateMessageSentToOpenAI(message);
             }
             TryTriggerOpenAICall(mentionSelf);

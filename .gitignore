@@ -5,3 +5,4 @@ messages.json
 .DS_Store
 messagesPointer.txt
 logs
+.vscode/

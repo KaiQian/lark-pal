@@ -14,7 +14,14 @@ cp config/default.sample.json config/default.json
 ```
 
 然后修改`config/default.json`中的配置项：
-- `openAI.APIKey` OpenAI Key
+- `openAI.model` 使用的模型。
+- `openAI.llms` 使用的大模型列表。
+- `openAI.llms.name` 大模型的名称。
+- `openAI.llms.apiKey` 大模型的API Key。
+- `openAI.llms.baseURL` 大模型的Base URL。
+- `openAI.llms.currencySymbol` 大模型的计价货币符号。
+- `openAI.llms.tokenCountForImage512` 大模型生成图片(512x512)的token数。
+- `openAI.llms.models` 大模型的模型列表。
 - `openAI.maxCompletionTokens` 单次OpenAI请求生成的token数限制
 - `openAI.maxPromptTokens` 单次OpenAI请求发送的token数限制，此限制数会与`assistant.messageBatchPeriodDays`一起影响发送给AI的消息数量。需要注意的是，因为实现的原因，token数量的限制并不是精确的。
 - `assistant.idleTimeSeconds` AI助手的等待时间（秒），即多久没有收到消息后会触发AI助手的回复。此设定是为了减少OpenAI的调用频率，尤其当群里消息比较密集时。但如果有人@AI助手，它会立即回复。
