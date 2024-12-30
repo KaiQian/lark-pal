@@ -229,6 +229,14 @@ async function triggerOpenAICall() {
                 let res = await sendMessage(reply);
                 if (res.code == 0) {
                     utils.logDebug('Message sent successfully');
+                    let messages = await fetchAMessage(res.data.message_id);
+                    if (messages) {
+                        for (let i = 0; i < messages.length; i++) {
+                            let message = messages[i];
+                            utils.logInfo("Full message information: \n" + JSON.stringify(message, null, 4));
+                            await generateMessageSentToOpenAI(message);
+                        }
+                    }
                 } else {
                     utils.logDebug('Failed to send message: ' + res.code + ', ' + res.msg + ', ' + JSON.stringify(res.data));
                 }
