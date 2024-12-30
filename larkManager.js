@@ -8,6 +8,7 @@ const messagePointer = require('./messagePointer');
 
 let client, wsClient;
 let chatDesc;
+let botName;
 
 const idleTime = config.get('assistant.idleTimeSeconds') * 1000; // Convert to milliseconds
 const INSTANT_DELAY = 3000;
@@ -27,7 +28,10 @@ async function init() {
     };
     client = new lark.Client(baseConfig);
     utils.logDebug('Lark client initialized');
-    
+
+    botName = await getBotName();
+    utils.logDebug('Bot name: ' + botName);
+
     chatDesc = await fetchChatDescription();
     utils.logDebug('Fetch chat description: ' + JSON.stringify(chatDesc, null, 4));
     
@@ -57,6 +61,32 @@ async function init() {
 }
 
 /**
+* Fetches the name of the bot from the Lark API.
+* @returns {Promise<string|null>} The name of the bot if successful, otherwise null.
+*/
+async function getBotName() {
+    try {
+        let res = await client.application.application.get({
+            path: {
+                app_id: config.lark.appId,
+            },
+            params: {
+                lang: 'en_us',
+            }
+        });
+        if (res.code == 0) {
+            return res.data.app.app_name;
+        } else {
+            utils.logDebug("Error! Code: " + res.code + ", Msg: " + res.msg);
+            return null;
+        }
+    } catch (e) {
+        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        return null;
+    };
+}
+
+/**
 * Fetches messages from Lark within a specified time range.
 * @param {number} currentTime - The current time in seconds since the Unix epoch.
 * @param {number} startTime - The start time in seconds since the Unix epoch.
@@ -72,7 +102,7 @@ async function fetchMessages(currentTime, startTime, pageToken) {
                 start_time: startTime.toString(),
                 end_time: currentTime.toString(),
                 sort_type: 'ByCreateTimeAsc',
-                page_size: 10,
+                page_size: 20,
                 page_token: pageToken,
             },
         });
@@ -122,7 +152,7 @@ async function generateMessageSentToOpenAI(message) {
                 let res = await fetchSenderInfo(message.sender.id);
                 messageToOpenAI.sender = res.data.user.name;
             } else {
-                messageToOpenAI.sender = '李白';
+                messageToOpenAI.sender = botName;
             }
             messageToOpenAI.time = Number(message.create_time);
         }
@@ -208,7 +238,7 @@ function TryTriggerOpenAICall(instantReply) {
 async function triggerOpenAICall() {
     try {
         isCountingDownInstantReplay = false;
-        let prompt = config.assistant.systemPrompt;
+        let prompt = "Your name is " + botName + ".\n" + config.assistant.systemPrompt;
         let inputModel = config.openAI.model;
         if (config.lark.useChatDesc) {
             if (chatDesc.prompt) {
@@ -220,7 +250,7 @@ async function triggerOpenAICall() {
         }
         let {reply, model, cost, currencySymbol} = await openAIManager.sendToOpenAI(messageStorage.getRecentMessages(), prompt, inputModel);
         if (reply) {
-            if (reply.startsWith('[x]')) {
+            if (reply.includes('[x]')) {
                 utils.logInfo(`[Internal] ${reply}`);
             } else {
                 utils.logInfo(`Sending message: ${reply}`);
