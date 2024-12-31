@@ -40,12 +40,12 @@
             "outputPrice": 2
           },
           "qwen-vl-max": {
-            "inputPrice": 20,
-            "outputPrice": 20
+            "inputPrice": 3,
+            "outputPrice": 9
           },
           "qwen-vl-plus": {
-            "inputPrice": 8,
-            "outputPrice": 8
+            "inputPrice": 1.5,
+            "outputPrice": 4.5
           }
         }
       }
