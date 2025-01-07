@@ -7,10 +7,20 @@ let _llms = {}; // llm name -> llm instance
 let _llmForModel = {}; // model name -> llm name
 let _encoder = null;
 
+/**
+ * Retrieves the LLM instance for a given model.
+ * @param {string} model - The model name.
+ * @returns {Object|null} The LLM instance if available, otherwise null.
+ */
 function getLLM(model) {
     return _llms[_llmForModel[model]];
 }
 
+/**
+ * Retrieves information about a specific model.
+ * @param {string} model - The model name.
+ * @returns {Object|null} The model information if available, otherwise null.
+ */
 function getModelInfo(model) {
     for (let llm of config.openAI.llms) {
         if (llm.models[model]) {
@@ -20,6 +30,11 @@ function getModelInfo(model) {
     return null;
 }
 
+/**
+ * Retrieves the currency symbol for a specific model.
+ * @param {string} model - The model name.
+ * @returns {string|null} The currency symbol if available, otherwise null.
+ */
 function getCurrencySymbol(model) {
     for (let llm of config.openAI.llms) {
         if (llm.models[model]) {
@@ -29,6 +44,11 @@ function getCurrencySymbol(model) {
     return null;
 }
  
+/**
+ * Retrieves the token count for a 512x512 image for a specific model.
+ * @param {string} model - The model name.
+ * @returns {number|null} The token count if available, otherwise null.
+ */
 function getTokenCountForImage512(model) {
     for (let llm of config.openAI.llms) {
         if (llm.models[model]) {
@@ -38,6 +58,11 @@ function getTokenCountForImage512(model) {
     return null;
 }
 
+/**
+ * Checks if a specific model is available.
+ * @param {string} model - The model name.
+ * @returns {boolean} True if the model is available, otherwise false.
+ */
 function isModelAvailable(model) {
     return !!_llmForModel[model];
 }
@@ -54,24 +79,30 @@ async function sendToOpenAI(messages, prompt, model) {
     }
     let composedMessages = composeMessages(messages, prompt, model);
     utils.logDebug(`Sending message to ${_llmForModel[model]}: Model ${model}`);
-    const response = await getLLM(model).chat.completions.create({
-        model: model,
-        messages: composedMessages,
-        max_tokens: config.openAI.maxCompletionTokens
-    });
+    try {
+        const response = await getLLM(model).chat.completions.create({
+            model: model,
+            messages: composedMessages,
+            max_tokens: config.openAI.maxCompletionTokens
+        });
 
-    const usage = response.usage;
-    let modelInfo = getModelInfo(model);
-    if (modelInfo) {
-        let inputPrice = modelInfo.inputPrice;
-        let outputPrice = modelInfo.outputPrice;
-        let cost = usage.prompt_tokens * inputPrice / 1000000 + usage.completion_tokens * outputPrice / 1000000;
-        let currencySymbol = getCurrencySymbol(model);
-        utils.logInfo(`Usage: ${JSON.stringify(usage, null, 4)} Input Price: ${inputPrice}, Output Price: ${outputPrice}, Total Cost: ${currencySymbol}${cost.toFixed(4)}`);
-        if (response.choices && response.choices.length > 0) {
-            let reply = response.choices[0].message.content;
-            return {reply, model, cost, currencySymbol};
+        const usage = response.usage;
+        let modelInfo = getModelInfo(model);
+        if (modelInfo) {
+            let inputPrice = modelInfo.inputPrice;
+            let outputPrice = modelInfo.outputPrice;
+            let cost = (usage.prompt_tokens * inputPrice + usage.completion_tokens * outputPrice) / 1000000;
+            let currencySymbol = getCurrencySymbol(model);
+            utils.logInfo(`Usage: ${JSON.stringify(usage, null, 4)} Input Price: ${inputPrice}, Output Price: ${outputPrice}, Total Cost: ${currencySymbol}${cost.toFixed(4)}`);
+            if (response.choices && response.choices.length > 0) {
+                let reply = response.choices[0].message.content;
+                return { reply, model, cost, currencySymbol };
+            }
         }
+    } catch (error) {
+        const errorMessage = `Error sending message to OpenAI: ${error.message}`;
+        utils.logError(errorMessage);
+        throw new Error(errorMessage);
     }
 }
 
@@ -92,9 +123,9 @@ function composeMessages(messages, prompt, model) {
     let promptTokens = countTokens(result[0]);
     const maxPromptTokens = config.get('openAI.maxPromptTokens');
 
-    for (let i = messages.length-1; i >= 0; i--) {
+    for (let i = messages.length - 1; i >= 0; i--) {
         const message = messages[i];
-        const aiMsg = {role: (message.bot ? 'assistant' : 'user')};
+        const aiMsg = { role: (message.bot ? 'assistant' : 'user') };
         const timeStr = new Date(message.time).toLocaleString('zh-CN', {
             weekday: 'short', // long, short, narrow
             day: 'numeric', // numeric, 2-digit
@@ -112,11 +143,7 @@ function composeMessages(messages, prompt, model) {
                 { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${message.image}` } }
             ];
         } else if (message.text) {
-            if (message.bot) {
-                aiMsg.content = [{type: 'text', text: message.text}];
-            } else {
-                aiMsg.content = [{type: 'text', text: prefix + message.text}];
-            }
+            aiMsg.content = [{ type: 'text', text: message.bot ? message.text : prefix + message.text }];
         }
 
         let tokens = countTokens(aiMsg, model);
@@ -131,12 +158,18 @@ function composeMessages(messages, prompt, model) {
     return result;
 }
 
+/**
+ * Counts the number of tokens in a message.
+ * @param {Object} message - The message object.
+ * @param {string} model - The model name.
+ * @returns {number} The number of tokens in the message.
+ */
 function countTokens(message, model) {
     if (typeof (message.content) === 'string') {
         return _encoder.encode(message.content).length;
     }
     let count = 0;
-    for (let i= 0; i < message.content.length; i++) {
+    for (let i = 0; i < message.content.length; i++) {
         const content = message.content[i];
         if (content.type === 'text') {
             count += _encoder.encode(content.text).length;
@@ -147,6 +180,9 @@ function countTokens(message, model) {
     return count;
 }
 
+/**
+ * Initializes the OpenAI manager, setting up LLM instances and encoders.
+ */
 function init() {
     for (let llm of config.openAI.llms) {
         _llms[llm.name] = new OpenAI({ apiKey: llm.apiKey, baseURL: llm.baseURL });

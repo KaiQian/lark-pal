@@ -10,6 +10,8 @@ let client, wsClient;
 let chatDesc;
 let botName;
 
+const SECONDS_IN_HOUR = 3600;
+const IMAGE_DIMENSION = 512;
 const idleTime = config.get('assistant.idleTimeSeconds') * 1000; // Convert to milliseconds
 const INSTANT_DELAY = 3000;
 let isCountingDownInstantReplay = false;
@@ -32,12 +34,14 @@ async function init() {
     botName = await getBotName();
     utils.logDebug('Bot name: ' + botName);
 
-    chatDesc = await fetchChatDescription();
-    utils.logDebug('Fetch chat description: ' + JSON.stringify(chatDesc, null, 4));
+    if (config.lark.useChatDesc) {
+        chatDesc = await fetchChatDescription();
+        utils.logDebug('Fetch chat description: ' + JSON.stringify(chatDesc, null, 4));
+    }
     
     utils.logDebug('Fetching messages...');
     let currentTime = Math.floor(Date.now() / 1000);
-    let startTime = currentTime - 3600 * 24 * config.assistant.messageBatchPeriodDays;
+    let startTime = currentTime - SECONDS_IN_HOUR * 24 * config.assistant.messageBatchPeriodDays;
     let lastestMessageTime = Math.floor(messageStorage.getLatestMessageTime() / 1000);
     if (lastestMessageTime > startTime) startTime = lastestMessageTime;
     let messages = await fetchMessages(currentTime, startTime);
@@ -64,6 +68,16 @@ async function init() {
 * Fetches the name of the bot from the Lark API.
 * @returns {Promise<string|null>} The name of the bot if successful, otherwise null.
 */
+function handleApiResponse(res) {
+    if (res.code === 0) {
+        return res.data;
+    } else {
+        const error = new Error(`Error! Code: ${res.code}, Msg: ${res.msg}`);
+        utils.logError(error.message);
+        throw error;
+    }
+}
+
 async function getBotName() {
     try {
         let res = await client.application.application.get({
@@ -74,14 +88,10 @@ async function getBotName() {
                 lang: 'en_us',
             }
         });
-        if (res.code == 0) {
-            return res.data.app.app_name;
-        } else {
-            utils.logDebug("Error! Code: " + res.code + ", Msg: " + res.msg);
-            return null;
-        }
+        const data = handleApiResponse(res);
+        return data ? data.app.app_name : null;
     } catch (e) {
-        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        utils.logError("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
         return null;
     };
 }
@@ -92,10 +102,10 @@ async function getBotName() {
 * @param {number} startTime - The start time in seconds since the Unix epoch.
 * @param {string} pageToken - The token for the next page of results.
 */
-async function fetchMessages(currentTime, startTime, pageToken) {
+async function fetchMessages(currentTime, startTime, pageToken = '') {
     utils.logDebug('Fetching messages from Lark...');
     try {
-        let res = await client.im.message.list({
+        const res = await client.im.message.list({
             params: {
                 container_id_type: 'chat',
                 container_id: config.lark.chatId,
@@ -107,22 +117,16 @@ async function fetchMessages(currentTime, startTime, pageToken) {
             },
         });
 
-        let messages = [];
-        if (res.code == 0) {  // 0 indicates success
-            for (let i = 0; i < res.data.items.length; i++) {
-                messages.push(res.data.items[i]);
-            }
-            if (res.data.has_more) {
-                return messages.concat(await fetchMessages(currentTime, startTime, res.data.page_token));
-            } else {
-                return messages;
-            }
-        } else {
-            utils.logDebug("Error! Code: " + res.code + ", Msg: " + res.msg);
-            return [];
+        const data = handleApiResponse(res);
+        const messages = data.items || [];
+
+        if (data.has_more) {
+            return messages.concat(await fetchMessages(currentTime, startTime, data.page_token));
         }
+
+        return messages;
     } catch (e) {
-        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        utils.logError("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
         return [];
     }
 }
@@ -305,9 +309,11 @@ async function handleDispatchedChatUpdate(data) {
     try {
         utils.logDebug("Handling dispatched chat update: " + JSON.stringify(data, null, 4));
         if (data.chat_id != config.lark.chatId) return;
-        if (data.after_change && data.after_change.description) {
-            chatDesc = processChatDesc(data.after_change.description);
-            utils.logInfo("Chat description updated: " + data.after_change.description);
+        if (config.lark.useChatDesc) {
+            if (data.after_change && data.after_change.description) {
+                chatDesc = processChatDesc(data.after_change.description);
+                utils.logInfo("Chat description updated: " + data.after_change.description);
+            }
         }
     } catch (e) {
         utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
@@ -326,14 +332,10 @@ async function fetchChatDescription() {
                 }
             }
         );
-        if (res.code == 0) {
-            return processChatDesc(res.data.description);
-        } else {
-            utils.logError("Error! Code: " + res.code + ", Msg: " + res.msg);
-            return null;
-        }
+        const data = handleApiResponse(res);
+        return data ? processChatDesc(data.description) : null;
     } catch (e) {
-        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        utils.logError("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
         return null;
     }
 }
@@ -389,14 +391,10 @@ async function fetchAMessage(messageId) {
                 message_id: messageId,
             },
         });
-        if (res.code == 0) { // 0表示成功
-            return res.data.items;
-        } else {
-            utils.logError("Error! Code: " + res.code + ", Msg: " + res.msg);
-            return null;
-        }
+        const data = handleApiResponse(res);
+        return data ? data.items : null;
     } catch (e) {
-        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        utils.logError("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
         return null;
     }
 }
@@ -447,8 +445,7 @@ async function fetchImage(messageId, imageKey) {
             });
             stream.on('end', async () => {
                 const binaryContent = Buffer.concat(chunks);
-                let dimension = 512;
-                const resizedBuffer = await sharp(binaryContent).resize({ width: dimension, height: dimension, fit: sharp.fit.inside, withoutEnlargement: true }).jpeg().toBuffer();
+                const resizedBuffer = await sharp(binaryContent).resize({ width: IMAGE_DIMENSION, height: IMAGE_DIMENSION, fit: sharp.fit.inside, withoutEnlargement: true }).jpeg().toBuffer();
                 const base64Data = resizedBuffer.toString('base64');
                 resolve(base64Data);
             });
@@ -467,17 +464,17 @@ async function sendMessage(message) {
     try {
         let res = await client.im.message.create({
             params: {
-                receive_id_type: "chat_id",
+                receive_id_type: 'chat_id',
             },
             data: {
                 receive_id: config.lark.chatId,
-                msg_type: "text",
+                msg_type: 'text',
                 content: JSON.stringify(JSON.parse(`{"text":"${message}"}`))
             }
         });
         return res;
     } catch (e) {
-        utils.logDebug("Error! " + JSON.stringify(e, null, 4) + "\n" + e.stack);
+        utils.logDebug('Error! ' + JSON.stringify(e, null, 4) + '\n' + e.stack);
         return null;
     }
 }
