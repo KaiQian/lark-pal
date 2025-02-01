@@ -144,6 +144,8 @@ function composeMessages(messages, prompt, model) {
             ];
         } else if (message.text) {
             aiMsg.content = [{ type: 'text', text: message.bot ? message.text : prefix + message.text }];
+        } else {
+            continue;
         }
 
         let tokens = countTokens(aiMsg, model);
@@ -165,9 +167,10 @@ function composeMessages(messages, prompt, model) {
  * @returns {number} The number of tokens in the message.
  */
 function countTokens(message, model) {
-    if (typeof (message.content) === 'string') {
+    if (!message.content)
+        return 0;
+    if (typeof (message.content) === 'string')
         return _encoder.encode(message.content).length;
-    }
     let count = 0;
     for (let i = 0; i < message.content.length; i++) {
         const content = message.content[i];

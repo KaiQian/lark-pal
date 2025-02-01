@@ -193,6 +193,9 @@ async function generateMessageSentToOpenAI(message) {
                 imageData = await fetchImage(message.message_id, JSON.parse(message.body.content).image_key);
                 messageToOpenAI.image = "has image"; // temporary
                 break;
+            case 'hongbao':
+                messageToOpenAI.text = JSON.parse(message.body.content).text;
+                break;
         }
         utils.logDebug(messageToOpenAI); // print the message object before processing image
         if (imageData) {
