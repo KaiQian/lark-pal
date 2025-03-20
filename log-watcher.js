@@ -3,7 +3,7 @@ const { spawn } = require('child_process');
 const utils = require('./utils');
 
 const LOG_FILE = './logs/pm2.log';
-const SERVICE_NAME = 'wechat-pal';
+const SERVICE_NAME = 'lark-pal';
 const KEYWORD = 'token does not exist';
 
 utils.init();
