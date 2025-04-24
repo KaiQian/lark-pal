@@ -17,7 +17,7 @@ pm2 save
 
 # 设置 PM2 开机自启
 echo "设置 PM2 开机自启..."
-pm2 startup ubuntu
+pm2 startup
 
 # 提示完成
 echo "应用已启动并配置为开机自启。"
